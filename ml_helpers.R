@@ -1,0 +1,290 @@
+.write_matrix_csv_gz <- function(x, path) {
+  con <- gzfile(path, open = "wt")
+  on.exit(close(con), add = TRUE)
+  write.csv(as.data.frame(x, check.names = FALSE), con, row.names = FALSE)
+}
+
+
+.write_csv <- function(x, path) {
+  utils::write.csv(x, path, row.names = FALSE)
+}
+
+
+.write_json_simple <- function(x, path) {
+  if (!requireNamespace("jsonlite", quietly = TRUE)) {
+    stop("Package 'jsonlite' is required to write ML run config files.")
+  }
+  jsonlite::write_json(x, path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+}
+
+
+.write_prepared_dataset <- function(dataset, fu_dir) {
+  dir.create(fu_dir, recursive = TRUE, showWarnings = FALSE)
+
+  .write_matrix_csv_gz(dataset$enet_x_train, file.path(fu_dir, "enet_train.csv.gz"))
+  .write_matrix_csv_gz(dataset$enet_x_test, file.path(fu_dir, "enet_test.csv.gz"))
+  .write_matrix_csv_gz(dataset$xgb_x_train, file.path(fu_dir, "xgb_train.csv.gz"))
+  .write_matrix_csv_gz(dataset$xgb_x_test, file.path(fu_dir, "xgb_test.csv.gz"))
+
+  .write_csv(
+    rbind(
+      data.frame(
+        SUBJECT_ID = dataset$subject_ids_train,
+        FU = dataset$fu_level,
+        SET = "train",
+        TREATMENT_GROUP = dataset$y_train,
+        FOLD_ID = dataset$foldid,
+        stringsAsFactors = FALSE
+      ),
+      data.frame(
+        SUBJECT_ID = dataset$subject_ids_test,
+        FU = dataset$fu_level,
+        SET = "test",
+        TREATMENT_GROUP = dataset$y_test,
+        FOLD_ID = NA_integer_,
+        stringsAsFactors = FALSE
+      )
+    ),
+    file.path(fu_dir, "subjects.csv")
+  )
+  .write_csv(dataset$preprocessing, file.path(fu_dir, "preprocessing.csv"))
+}
+
+
+.run_enet_worker <- function(dataset, out_dir, seed = 1L, alpha = 0.5) {
+  if (!requireNamespace("glmnet", quietly = TRUE)) {
+    stop("Package 'glmnet' is required for ENET models.")
+  }
+
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  penalty_factor <- ifelse(
+    startsWith(colnames(dataset$enet_x_train), "covariate::"),
+    0,
+    1
+  )
+
+  set.seed(seed)
+  cv_fit <- glmnet::cv.glmnet(
+    x = dataset$enet_x_train,
+    y = dataset$y_train,
+    family = "binomial",
+    alpha = alpha,
+    foldid = dataset$foldid,
+    type.measure = "deviance",
+    standardize = FALSE,
+    penalty.factor = penalty_factor,
+    keep = TRUE
+  )
+
+  cv_aucs <- apply(cv_fit$fit.preval, 2, function(pred) .safe_auc(dataset$y_train, pred))
+  if (all(is.na(cv_aucs))) {
+    lambda <- cv_fit$lambda.min
+    cv_auc <- NA_real_
+  } else {
+    best_idx <- which.max(cv_aucs)
+    lambda <- cv_fit$lambda[best_idx]
+    cv_auc <- cv_aucs[best_idx]
+  }
+
+  fit <- cv_fit$glmnet.fit
+  train_pred <- as.numeric(predict(fit, newx = dataset$enet_x_train, s = lambda, type = "response"))
+  test_pred <- as.numeric(predict(fit, newx = dataset$enet_x_test, s = lambda, type = "response"))
+
+  coefs <- as.matrix(stats::coef(fit, s = lambda))
+  weights <- data.frame(
+    FEATURE_NAME = rownames(coefs),
+    WEIGHT = as.numeric(coefs[, 1]),
+    stringsAsFactors = FALSE
+  )
+  weights$FEATURE_TYPE <- ifelse(
+    weights$FEATURE_NAME == "(Intercept)",
+    "intercept",
+    ifelse(startsWith(weights$FEATURE_NAME, "omics::"), "omics", "covariate")
+  )
+  weights <- weights[
+    weights$WEIGHT != 0 |
+      weights$FEATURE_NAME == "(Intercept)" |
+      weights$FEATURE_TYPE == "covariate",
+    ,
+    drop = FALSE
+  ]
+  row.names(weights) <- NULL
+
+  metrics <- data.frame(
+    CV_AUC = cv_auc,
+    TEST_AUC = .safe_auc(dataset$y_test, test_pred),
+    INSAMPLE_AUC = .safe_auc(dataset$y_train, train_pred),
+    LAMBDA = lambda,
+    LAMBDA_1SE = cv_fit$lambda.1se,
+    ALPHA = alpha,
+    N_FEATURES = ncol(dataset$enet_x_train),
+    N_NONZERO = sum(
+      weights$FEATURE_NAME != "(Intercept)" & weights$WEIGHT != 0
+    ),
+    N_UNPENALIZED = sum(penalty_factor == 0),
+    stringsAsFactors = FALSE
+  )
+
+  predictions <- rbind(
+    data.frame(
+      SET = "train",
+      SUBJECT_ID = dataset$subject_ids_train,
+      FU = dataset$fu_level,
+      TREATMENT_GROUP = dataset$y_train,
+      PREDICTED_PROB = train_pred,
+      stringsAsFactors = FALSE
+    ),
+    data.frame(
+      SET = "test",
+      SUBJECT_ID = dataset$subject_ids_test,
+      FU = dataset$fu_level,
+      TREATMENT_GROUP = dataset$y_test,
+      PREDICTED_PROB = test_pred,
+      stringsAsFactors = FALSE
+    )
+  )
+
+  .write_csv(metrics, file.path(out_dir, "metrics.csv"))
+  .write_csv(predictions, file.path(out_dir, "predictions.csv"))
+  .write_csv(weights, file.path(out_dir, "weights.csv"))
+
+  list(
+    metrics = file.path(out_dir, "metrics.csv"),
+    predictions = file.path(out_dir, "predictions.csv"),
+    weights = file.path(out_dir, "weights.csv")
+  )
+}
+
+
+.run_xgb_worker <- function(fu_dir, out_dir, python_bin = "python3",
+                            n_trials = 0L, seed = 1L, n_cores = 1L) {
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+  args <- c(
+    file.path("scripts", "run_xgb.py"),
+    "--data-dir", fu_dir,
+    "--out-dir", out_dir,
+    "--seed", as.character(seed),
+    "--nthread", as.character(max(1L, as.integer(n_cores))),
+    "--n-trials", as.character(as.integer(n_trials))
+  )
+
+  status <- system2(python_bin, args = args)
+  if (!identical(status, 0L)) {
+    stop("XGB worker failed with exit status ", status, ".")
+  }
+
+  list(
+    metrics = file.path(out_dir, "metrics.csv"),
+    predictions = file.path(out_dir, "predictions.csv"),
+    importance = file.path(out_dir, "importance.csv"),
+    tuning = file.path(out_dir, "tuning.csv"),
+    model = file.path(out_dir, "model.json")
+  )
+}
+
+
+.run_ml_disk <- function(pheno_df, omics_df, additional_covariates = NULL,
+                         models = c("enet", "xgb"), output_dir,
+                         test_frac = 0.2, cv_folds = 5L, seed = 1L,
+                         n_cores = 1L, python_bin = "python3",
+                         xgb_n_trials = 0L) {
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  manifest <- list(
+    output_dir = normalizePath(output_dir, mustWork = FALSE),
+    target = "TREATMENT_GROUP",
+    feature_mode = "change",
+    requested_models = models,
+    test_frac = test_frac,
+    cv_folds = cv_folds,
+    seed = seed,
+    additional_covariates = additional_covariates,
+    followups = list()
+  )
+
+  split <- .stratified_subject_split(
+    pheno_df,
+    test_frac = test_frac,
+    seed = seed,
+    min_per_class = max(2L, cv_folds)
+  )
+  if (is.null(split)) {
+    stop("Unable to create a subject-level train/test split.", call. = FALSE)
+  }
+
+  fu_levels <- sort(unique(as.integer(as.character(pheno_df$FU))))
+  fu_levels <- fu_levels[fu_levels != 0L]
+
+  for (fu_level in fu_levels) {
+    fu_key <- paste0("FU", fu_level)
+    fu_dir <- file.path(output_dir, fu_key)
+
+    message(fu_key, ": preparing model-ready datasets.")
+    prepared <- .prepare_fu_change_dataset(
+      pheno_df = pheno_df,
+      omics_df = omics_df,
+      fu_level = fu_level,
+      split = split,
+      additional_covariates = additional_covariates,
+      cv_folds = cv_folds,
+      seed = seed + fu_level
+    )
+    if (is.null(prepared)) {
+      manifest$followups[[fu_key]] <- NULL
+      next
+    }
+
+    .write_prepared_dataset(prepared, fu_dir)
+    message(
+      fu_key, ": prepared ", length(prepared$subject_ids_train), " training and ",
+      length(prepared$subject_ids_test), " test subjects."
+    )
+
+    fu_manifest <- list(
+      data_dir = normalizePath(fu_dir, mustWork = FALSE),
+      artifacts = list(
+        enet_train = file.path(fu_dir, "enet_train.csv.gz"),
+        enet_test = file.path(fu_dir, "enet_test.csv.gz"),
+        xgb_train = file.path(fu_dir, "xgb_train.csv.gz"),
+        xgb_test = file.path(fu_dir, "xgb_test.csv.gz"),
+        subjects = file.path(fu_dir, "subjects.csv"),
+        preprocessing = file.path(fu_dir, "preprocessing.csv")
+      ),
+      models = list()
+    )
+
+    if ("enet" %in% models) {
+      message(fu_key, ": fitting ENET.")
+      fu_manifest$models$enet <- .run_enet_worker(
+        prepared,
+        out_dir = file.path(fu_dir, "enet"),
+        seed = seed + fu_level
+      )
+      message(fu_key, ": ENET complete.")
+    }
+
+    if ("xgb" %in% models) {
+      message(
+        fu_key, ": fitting XGB",
+        if (xgb_n_trials > 0L) paste0(" with ", xgb_n_trials, " Optuna trials.") else "."
+      )
+      fu_manifest$models$xgb <- .run_xgb_worker(
+        fu_dir = fu_dir,
+        out_dir = file.path(fu_dir, "xgb"),
+        python_bin = python_bin,
+        n_trials = xgb_n_trials,
+        seed = seed + fu_level,
+        n_cores = n_cores
+      )
+      message(fu_key, ": XGB complete.")
+    }
+
+    manifest$followups[[fu_key]] <- fu_manifest
+  }
+
+  manifest_path <- file.path(output_dir, "manifest.json")
+  .write_json_simple(manifest, manifest_path)
+  manifest$manifest_path <- manifest_path
+  manifest
+}

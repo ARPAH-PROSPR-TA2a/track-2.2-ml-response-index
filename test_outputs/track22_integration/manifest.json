@@ -1,0 +1,37 @@
+{
+  "output_dir": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration",
+  "target": "TREATMENT_GROUP",
+  "feature_mode": "change",
+  "requested_models": ["enet", "xgb"],
+  "test_frac": 0.2,
+  "cv_folds": 5,
+  "seed": 2202,
+  "additional_covariates": ["FEMALE", "age", "bmi", "site", "smoker"],
+  "followups": {
+    "FU1": {
+      "data_dir": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1",
+      "artifacts": {
+        "enet_train": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/enet_train.csv.gz",
+        "enet_test": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/enet_test.csv.gz",
+        "xgb_train": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_train.csv.gz",
+        "xgb_test": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_test.csv.gz",
+        "subjects": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/subjects.csv",
+        "preprocessing": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/preprocessing.csv"
+      },
+      "models": {
+        "enet": {
+          "metrics": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/enet/metrics.csv",
+          "predictions": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/enet/predictions.csv",
+          "weights": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/enet/weights.csv"
+        },
+        "xgb": {
+          "metrics": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb/metrics.csv",
+          "predictions": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb/predictions.csv",
+          "importance": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb/importance.csv",
+          "tuning": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb/tuning.csv",
+          "model": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb/model.json"
+        }
+      }
+    }
+  }
+}
