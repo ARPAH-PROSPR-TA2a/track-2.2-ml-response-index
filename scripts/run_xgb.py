@@ -26,6 +26,36 @@ def auc(y, pred):
     return float(roc_auc_score(y, pred))
 
 
+def build_repeated_folds(fold_df, train_subjects, np):
+    train_subjects = [str(subject_id) for subject_id in train_subjects]
+    subject_index = {subject_id: index for index, subject_id in enumerate(train_subjects)}
+    repeated_folds = []
+
+    fold_df = fold_df.copy()
+    fold_df["SUBJECT_ID"] = fold_df["SUBJECT_ID"].astype(str)
+    for repeat_id in sorted(fold_df["REPEAT"].unique()):
+        repeat_df = fold_df[fold_df["REPEAT"] == repeat_id]
+        if len(repeat_df) != len(train_subjects):
+            raise RuntimeError(f"XGB repeat {repeat_id} does not contain every training subject.")
+        if set(repeat_df["SUBJECT_ID"]) != set(train_subjects):
+            raise RuntimeError(f"XGB repeat {repeat_id} subject IDs do not match subjects.csv.")
+
+        foldid = np.empty(len(train_subjects), dtype=int)
+        for row in repeat_df.itertuples(index=False):
+            foldid[subject_index[row.SUBJECT_ID]] = int(row.FOLD_ID)
+
+        folds = []
+        for fold in sorted(np.unique(foldid)):
+            valid_idx = np.where(foldid == fold)[0]
+            train_idx = np.where(foldid != fold)[0]
+            folds.append((train_idx, valid_idx))
+        repeated_folds.append((int(repeat_id), folds))
+
+    if not repeated_folds:
+        raise RuntimeError("xgb_folds.csv does not contain any CV repeats.")
+    return repeated_folds
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", required=True)
@@ -48,6 +78,7 @@ def main():
     x_train_df = pd.read_csv(data_dir / "xgb_train.csv.gz")
     x_test_df = pd.read_csv(data_dir / "xgb_test.csv.gz")
     subjects = pd.read_csv(data_dir / "subjects.csv")
+    xgb_folds_df = pd.read_csv(data_dir / "xgb_folds.csv")
     y_train_df = subjects[subjects["SET"] == "train"].reset_index(drop=True)
     y_test_df = subjects[subjects["SET"] == "test"].reset_index(drop=True)
 
@@ -55,16 +86,14 @@ def main():
     x_test = x_test_df.to_numpy(dtype=float)
     y_train = y_train_df["TREATMENT_GROUP"].to_numpy(dtype=int)
     y_test = y_test_df["TREATMENT_GROUP"].to_numpy(dtype=int)
-    foldid = y_train_df["FOLD_ID"].to_numpy(dtype=int)
 
     dtrain = xgb.DMatrix(x_train, label=y_train, feature_names=list(x_train_df.columns))
     dtest = xgb.DMatrix(x_test, label=y_test, feature_names=list(x_train_df.columns))
-
-    folds = []
-    for fold in sorted(np.unique(foldid)):
-        valid_idx = np.where(foldid == fold)[0]
-        train_idx = np.where(foldid != fold)[0]
-        folds.append((train_idx, valid_idx))
+    repeated_folds = build_repeated_folds(
+        xgb_folds_df,
+        y_train_df["SUBJECT_ID"].tolist(),
+        np,
+    )
 
     params = {
         "objective": "binary:logistic",
@@ -79,6 +108,31 @@ def main():
         "nthread": max(1, args.nthread),
         "seed": args.seed,
     }
+
+    def evaluate_repeated_cv(trial_params):
+        repeat_aucs = []
+        repeat_iterations = []
+        for repeat_id, folds in repeated_folds:
+            cv = xgb.cv(
+                trial_params,
+                dtrain,
+                num_boost_round=500,
+                folds=folds,
+                early_stopping_rounds=25,
+                verbose_eval=False,
+                seed=args.seed + repeat_id,
+            )
+            best_index = int(cv["test-auc-mean"].idxmax())
+            repeat_aucs.append(float(cv["test-auc-mean"].iloc[best_index]))
+            repeat_iterations.append(best_index + 1)
+
+        return {
+            "mean_auc": float(np.mean(repeat_aucs)),
+            "sd_auc": float(np.std(repeat_aucs, ddof=1)) if len(repeat_aucs) > 1 else 0.0,
+            "best_iteration": int(round(float(np.median(repeat_iterations)))),
+            "repeat_aucs": repeat_aucs,
+            "repeat_iterations": repeat_iterations,
+        }
 
     tuning_path = out_dir / "tuning.csv"
     if args.n_trials > 0:
@@ -100,39 +154,56 @@ def main():
                     "alpha": trial.suggest_float("alpha", 0.01, 20, log=True),
                 }
             )
-            cv = xgb.cv(
-                trial_params,
-                dtrain,
-                num_boost_round=500,
-                folds=folds,
-                early_stopping_rounds=25,
-                verbose_eval=False,
-                seed=args.seed,
-            )
-            best_auc = float(cv["test-auc-mean"].max())
-            trial.set_user_attr("best_iteration", int(cv["test-auc-mean"].idxmax() + 1))
-            return best_auc
+            result = evaluate_repeated_cv(trial_params)
+            trial.set_user_attr("cv_auc_sd", result["sd_auc"])
+            trial.set_user_attr("best_iteration", result["best_iteration"])
+            for index, value in enumerate(result["repeat_aucs"], start=1):
+                trial.set_user_attr(f"repeat_{index}_auc", value)
+            for index, value in enumerate(result["repeat_iterations"], start=1):
+                trial.set_user_attr(f"repeat_{index}_best_iteration", value)
+            return result["mean_auc"]
 
         sampler = optuna.samplers.TPESampler(seed=args.seed)
         study = optuna.create_study(direction="maximize", sampler=sampler)
         study.optimize(objective, n_trials=args.n_trials)
         params.update(study.best_params)
         best_iteration = int(study.best_trial.user_attrs["best_iteration"])
-        study.trials_dataframe().to_csv(tuning_path, index=False)
         cv_auc = float(study.best_value)
+        cv_auc_sd = float(study.best_trial.user_attrs["cv_auc_sd"])
+
+        tuning_rows = []
+        for trial in study.trials:
+            row = {
+                "TRIAL": trial.number,
+                "STATE": trial.state.name,
+                "CV_AUC_MEAN": trial.value,
+                "CV_AUC_SD": trial.user_attrs.get("cv_auc_sd"),
+                "BEST_ITERATION_MEDIAN": trial.user_attrs.get("best_iteration"),
+            }
+            for key, value in sorted(trial.user_attrs.items()):
+                if key.startswith("repeat_"):
+                    row[key.upper()] = value
+            row.update({f"PARAM_{key.upper()}": value for key, value in trial.params.items()})
+            tuning_rows.append(row)
+        pd.DataFrame(tuning_rows).to_csv(tuning_path, index=False)
     else:
-        cv = xgb.cv(
-            params,
-            dtrain,
-            num_boost_round=500,
-            folds=folds,
-            early_stopping_rounds=25,
-            verbose_eval=False,
-            seed=args.seed,
-        )
-        best_iteration = int(cv["test-auc-mean"].idxmax() + 1)
-        cv_auc = float(cv["test-auc-mean"].iloc[best_iteration - 1])
-        cv.to_csv(tuning_path, index=False)
+        result = evaluate_repeated_cv(params)
+        best_iteration = result["best_iteration"]
+        cv_auc = result["mean_auc"]
+        cv_auc_sd = result["sd_auc"]
+        tuning_row = {
+            "TRIAL": 0,
+            "STATE": "FIXED_PARAMETERS",
+            "CV_AUC_MEAN": cv_auc,
+            "CV_AUC_SD": cv_auc_sd,
+            "BEST_ITERATION_MEDIAN": best_iteration,
+        }
+        for index, value in enumerate(result["repeat_aucs"], start=1):
+            tuning_row[f"REPEAT_{index}_AUC"] = value
+        for index, value in enumerate(result["repeat_iterations"], start=1):
+            tuning_row[f"REPEAT_{index}_BEST_ITERATION"] = value
+        tuning_row.update({f"PARAM_{key.upper()}": value for key, value in params.items()})
+        pd.DataFrame([tuning_row]).to_csv(tuning_path, index=False)
 
     model = xgb.train(params, dtrain, num_boost_round=best_iteration, verbose_eval=False)
     train_pred = model.predict(dtrain)
@@ -140,6 +211,8 @@ def main():
 
     metrics_row = {
         "CV_AUC": cv_auc,
+        "CV_AUC_SD": cv_auc_sd,
+        "CV_REPEATS": len(repeated_folds),
         "TEST_AUC": auc(y_test, test_pred),
         "INSAMPLE_AUC": auc(y_train, train_pred),
         "BEST_ITERATION": best_iteration,

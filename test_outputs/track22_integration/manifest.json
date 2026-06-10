@@ -4,7 +4,10 @@
   "feature_mode": "change",
   "requested_models": ["enet", "xgb"],
   "test_frac": 0.2,
-  "cv_folds": 5,
+  "enet_cv_folds": 5,
+  "xgb_cv_folds": 5,
+  "xgb_cv_repeats": 3,
+  "xgb_n_trials": 3,
   "seed": 2202,
   "additional_covariates": ["FEMALE", "age", "bmi", "site", "smoker"],
   "followups": {
@@ -16,6 +19,7 @@
         "xgb_train": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_train.csv.gz",
         "xgb_test": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_test.csv.gz",
         "subjects": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/subjects.csv",
+        "xgb_folds": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_folds.csv",
         "preprocessing": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/preprocessing.csv"
       },
       "models": {

@@ -108,7 +108,9 @@ manifest <- FAST_treatment_ML(
   models = c("enet", "xgb"),
   output_dir = output_dir,
   test_frac = 0.2,
-  cv_folds = 5L,
+  enet_cv_folds = 5L,
+  xgb_cv_folds = 5L,
+  xgb_cv_repeats = 3L,
   seed = 220200L,
   n_cores = 2L,
   xgb_n_trials = 10L

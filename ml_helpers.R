@@ -33,7 +33,7 @@
         FU = dataset$fu_level,
         SET = "train",
         TREATMENT_GROUP = dataset$y_train,
-        FOLD_ID = dataset$foldid,
+        ENET_FOLD_ID = dataset$enet_foldid,
         stringsAsFactors = FALSE
       ),
       data.frame(
@@ -41,12 +41,13 @@
         FU = dataset$fu_level,
         SET = "test",
         TREATMENT_GROUP = dataset$y_test,
-        FOLD_ID = NA_integer_,
+        ENET_FOLD_ID = NA_integer_,
         stringsAsFactors = FALSE
       )
     ),
     file.path(fu_dir, "subjects.csv")
   )
+  .write_csv(dataset$xgb_folds, file.path(fu_dir, "xgb_folds.csv"))
   .write_csv(dataset$preprocessing, file.path(fu_dir, "preprocessing.csv"))
 }
 
@@ -70,7 +71,7 @@
     y = dataset$y_train,
     family = "binomial",
     alpha = alpha,
-    foldid = dataset$foldid,
+    foldid = dataset$enet_foldid,
     type.measure = "deviance",
     standardize = FALSE,
     penalty.factor = penalty_factor,
@@ -187,9 +188,10 @@
 
 .run_ml_disk <- function(pheno_df, omics_df, additional_covariates = NULL,
                          models = c("enet", "xgb"), output_dir,
-                         test_frac = 0.2, cv_folds = 5L, seed = 1L,
+                         test_frac = 0.2, enet_cv_folds = 5L,
+                         xgb_cv_folds = 5L, xgb_cv_repeats = 3L, seed = 1L,
                          n_cores = 1L, python_bin = "python3",
-                         xgb_n_trials = 0L) {
+                         xgb_n_trials = 50L) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   manifest <- list(
     output_dir = normalizePath(output_dir, mustWork = FALSE),
@@ -197,21 +199,14 @@
     feature_mode = "change",
     requested_models = models,
     test_frac = test_frac,
-    cv_folds = cv_folds,
+    enet_cv_folds = enet_cv_folds,
+    xgb_cv_folds = xgb_cv_folds,
+    xgb_cv_repeats = xgb_cv_repeats,
+    xgb_n_trials = xgb_n_trials,
     seed = seed,
     additional_covariates = additional_covariates,
     followups = list()
   )
-
-  split <- .stratified_subject_split(
-    pheno_df,
-    test_frac = test_frac,
-    seed = seed,
-    min_per_class = max(2L, cv_folds)
-  )
-  if (is.null(split)) {
-    stop("Unable to create a subject-level train/test split.", call. = FALSE)
-  }
 
   fu_levels <- sort(unique(as.integer(as.character(pheno_df$FU))))
   fu_levels <- fu_levels[fu_levels != 0L]
@@ -219,6 +214,27 @@
   for (fu_level in fu_levels) {
     fu_key <- paste0("FU", fu_level)
     fu_dir <- file.path(output_dir, fu_key)
+    fu_num <- as.integer(as.character(pheno_df$FU))
+    baseline_subjects <- pheno_df$SUBJECT_ID[fu_num == 0L]
+    followup_subjects <- pheno_df$SUBJECT_ID[fu_num == fu_level]
+    complete_subjects <- intersect(baseline_subjects, followup_subjects)
+    split_pheno <- pheno_df[
+      fu_num == fu_level & pheno_df$SUBJECT_ID %in% complete_subjects,
+      ,
+      drop = FALSE
+    ]
+
+    split <- .stratified_subject_split(
+      split_pheno,
+      test_frac = test_frac,
+      seed = seed + fu_level,
+      min_per_class = max(2L, enet_cv_folds, xgb_cv_folds)
+    )
+    if (is.null(split)) {
+      warning(fu_key, ": unable to create a subject-level train/test split.")
+      manifest$followups[[fu_key]] <- NULL
+      next
+    }
 
     message(fu_key, ": preparing model-ready datasets.")
     prepared <- .prepare_fu_change_dataset(
@@ -227,7 +243,9 @@
       fu_level = fu_level,
       split = split,
       additional_covariates = additional_covariates,
-      cv_folds = cv_folds,
+      enet_cv_folds = enet_cv_folds,
+      xgb_cv_folds = xgb_cv_folds,
+      xgb_cv_repeats = xgb_cv_repeats,
       seed = seed + fu_level
     )
     if (is.null(prepared)) {
@@ -249,6 +267,7 @@
         xgb_train = file.path(fu_dir, "xgb_train.csv.gz"),
         xgb_test = file.path(fu_dir, "xgb_test.csv.gz"),
         subjects = file.path(fu_dir, "subjects.csv"),
+        xgb_folds = file.path(fu_dir, "xgb_folds.csv"),
         preprocessing = file.path(fu_dir, "preprocessing.csv")
       ),
       models = list()

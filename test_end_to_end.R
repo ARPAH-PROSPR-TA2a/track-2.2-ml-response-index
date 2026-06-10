@@ -18,10 +18,12 @@ manifest <- suppressWarnings(FAST_treatment_ML(
   models = c("enet", "xgb"),
   output_dir = output_dir,
   test_frac = 0.2,
-  cv_folds = 5L,
+  enet_cv_folds = 5L,
+  xgb_cv_folds = 5L,
+  xgb_cv_repeats = 3L,
   seed = 2202L,
   n_cores = 1L,
-  xgb_n_trials = 10L,
+  xgb_n_trials = 3L,
   python_bin = "python"
 ))
 
@@ -38,6 +40,7 @@ artifact_paths <- unlist(fu1$artifacts, use.names = FALSE)
 .expect_true(all(file.exists(artifact_paths)), "canonical artifacts are written")
 
 subjects <- read.csv(fu1$artifacts$subjects, stringsAsFactors = FALSE)
+xgb_folds <- read.csv(fu1$artifacts$xgb_folds, stringsAsFactors = FALSE)
 enet_train <- read.csv(fu1$artifacts$enet_train, check.names = FALSE)
 enet_test <- read.csv(fu1$artifacts$enet_test, check.names = FALSE)
 xgb_train <- read.csv(fu1$artifacts$xgb_train, check.names = FALSE)
@@ -56,9 +59,16 @@ preprocessing <- read.csv(fu1$artifacts$preprocessing, stringsAsFactors = FALSE)
     nrow(enet_test) == sum(subjects$SET == "test") &&
     nrow(xgb_train) == sum(subjects$SET == "train") &&
     nrow(xgb_test) == sum(subjects$SET == "test") &&
-    all(!is.na(subjects$FOLD_ID[subjects$SET == "train"])) &&
-    all(is.na(subjects$FOLD_ID[subjects$SET == "test"])),
+    all(!is.na(subjects$ENET_FOLD_ID[subjects$SET == "train"])) &&
+    all(is.na(subjects$ENET_FOLD_ID[subjects$SET == "test"])),
   "canonical artifact row counts agree"
+)
+.expect_true(
+  identical(names(xgb_folds), c("SUBJECT_ID", "REPEAT", "FOLD_ID")) &&
+    nrow(xgb_folds) == sum(subjects$SET == "train") * 3L &&
+    identical(sort(unique(xgb_folds$REPEAT)), 1:3) &&
+    all(table(xgb_folds$SUBJECT_ID) == 3L),
+  "XGB fold artifact contains every training subject in every repeat"
 )
 .expect_true(
   any(startsWith(names(enet_train), "covariate::age")) &&
@@ -136,12 +146,21 @@ reconstructed_prob <- stats::plogis(linear_predictor)
   "XGB model JSON reloads"
 )
 .expect_true(
-  file.exists(fu1$models$xgb$tuning),
-  "XGB tuning output is written"
+  file.exists(fu1$models$xgb$tuning) &&
+    all(
+      c("CV_AUC_MEAN", "CV_AUC_SD", "BEST_ITERATION_MEDIAN") %in%
+        names(read.csv(fu1$models$xgb$tuning))
+    ),
+  "XGB repeated-CV tuning output is written"
 )
 .expect_true(
-  any(startsWith(names(read.csv(fu1$models$xgb$metrics)), "PARAM_")),
-  "XGB selected parameters are recorded in metrics"
+  {
+    xgb_metrics <- read.csv(fu1$models$xgb$metrics)
+    any(startsWith(names(xgb_metrics), "PARAM_")) &&
+      xgb_metrics$CV_REPEATS == 3L &&
+      is.finite(xgb_metrics$CV_AUC_SD)
+  },
+  "XGB selected parameters and repeated-CV metrics are recorded"
 )
 
 reports <- suppressWarnings(FAST_treatment_ML_reports(

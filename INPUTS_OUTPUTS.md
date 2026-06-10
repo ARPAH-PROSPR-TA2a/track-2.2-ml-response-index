@@ -52,6 +52,7 @@ output_dir/
     xgb_train.csv.gz
     xgb_test.csv.gz
     subjects.csv
+    xgb_folds.csv
     preprocessing.csv
     enet/
       metrics.csv
@@ -86,7 +87,17 @@ Column prefixes identify provenance:
 | `FU` | Follow-up modeled |
 | `SET` | `train` or `test` |
 | `TREATMENT_GROUP` | Outcome |
-| `FOLD_ID` | CV fold for training rows; blank for test rows |
+| `ENET_FOLD_ID` | ENET CV fold for training rows; blank for test rows |
+
+### `xgb_folds.csv`
+
+Contains the repeated XGB cross-validation assignments:
+
+| Column | Meaning |
+|:---|:---|
+| `SUBJECT_ID` | Training subject identifier |
+| `REPEAT` | XGB CV repeat number |
+| `FOLD_ID` | Treatment-stratified fold within that repeat |
 
 ### `preprocessing.csv`
 
@@ -141,8 +152,9 @@ without an R model object. The selected lambda remains in `metrics.csv`.
 
 ## XGB Output
 
-`xgb/metrics.csv` contains AUCs, best iteration, feature count, and selected
-XGBoost parameters.
+`xgb/metrics.csv` contains mean repeated-CV AUC, CV AUC SD, repeat count, test
+and in-sample AUCs, median best iteration, feature count, and selected XGBoost
+parameters.
 
 `xgb/predictions.csv` uses the same schema as ENET predictions.
 
@@ -152,8 +164,9 @@ XGBoost parameters.
 - `GAIN`
 - `FEATURE_TYPE`
 
-`xgb/tuning.csv` contains Optuna trial history when tuning is enabled, otherwise
-the XGBoost CV history.
+`xgb/tuning.csv` contains mean and SD CV AUC, per-repeat AUCs and best
+iterations, median best iteration, and parameters for every Optuna trial. When
+tuning is disabled, it contains one row for the fixed parameter set.
 
 `xgb/model.json` is the fitted XGBoost model.
 

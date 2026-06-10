@@ -21,10 +21,12 @@ manifest <- FAST_treatment_ML(
   models = c("enet", "xgb"),
   output_dir = "runs/trial_a_treatment_ml",
   test_frac = 0.2,
-  cv_folds = 5,
-  seed = 1,
+  enet_cv_folds = 5,
+  xgb_cv_folds = 5,
+  xgb_cv_repeats = 3,
+  xgb_n_trials = 50,
   n_cores = 8,
-  xgb_n_trials = 0
+  seed = 1
 )
 
 read.csv("runs/trial_a_treatment_ml/FU1/enet/metrics.csv")
@@ -73,10 +75,12 @@ reproduce predictions without a saved R model object.
 
 ### XGB
 
-XGB runs through `scripts/run_xgb.py`. With `xgb_n_trials = 0`, conservative
-defaults are used. Positive values run that many Optuna trials. Outputs include
-metrics and selected parameters, predictions, feature importance, tuning
-history, and the fitted JSON model.
+XGB runs through `scripts/run_xgb.py`. Each parameter set is evaluated across
+`xgb_cv_repeats` independent stratified fold assignments and scored by mean CV
+AUC. By default, 50 Optuna trials are evaluated across three 5-fold repeats.
+Setting `xgb_n_trials = 0` evaluates the fixed defaults with the same repeated
+CV scheme. Outputs include metrics and selected parameters, predictions,
+feature importance, tuning history, and the fitted JSON model.
 
 ## DNAm
 
@@ -97,6 +101,7 @@ output_dir/
     xgb_train.csv.gz
     xgb_test.csv.gz
     subjects.csv
+    xgb_folds.csv
     preprocessing.csv
     enet/
       metrics.csv
@@ -111,8 +116,9 @@ output_dir/
 ```
 
 The model-ready matrices contain exactly the columns consumed by each model.
-`subjects.csv` combines outcomes, train/test assignment, and CV fold assignment.
-Run settings and artifact paths are stored once in `manifest.json`.
+`subjects.csv` combines outcomes, train/test assignment, and ENET fold
+assignment. `xgb_folds.csv` stores every repeated XGB fold assignment. Run
+settings and artifact paths are stored once in `manifest.json`.
 
 See `INPUTS_OUTPUTS.md` for schemas.
 

@@ -16,51 +16,20 @@ summaries, but modeling is not sex-stratified.
 
 ## Table of Contents
 
-1. [File Structure](#file-structure)
-2. [Main Functions](#main-functions)
-3. [Accepted Inputs](#accepted-inputs)
-4. [Validation Flow](#validation-flow)
-5. [High-Level Modeling Flow](#high-level-modeling-flow)
-6. [Subject Splitting and CV Folds](#subject-splitting-and-cv-folds)
-7. [Follow-Up Feature Construction](#follow-up-feature-construction)
-8. [Preprocessing](#preprocessing)
-9. [Model-Specific Feature Sets](#model-specific-feature-sets)
-10. [ENET Worker](#enet-worker)
-11. [XGB Worker](#xgb-worker)
-12. [Disk Artifacts and Manifest](#disk-artifacts-and-manifest)
-13. [DNAm Handling](#dnam-handling)
-14. [Reporting Pipeline](#reporting-pipeline)
-15. [Tests](#tests)
-
----
-
-## File Structure
-
-```text
-main.R                    Public API and top-level orchestration
-validation_helpers.R      Phenotype/omics validation and harmonization
-feature_helpers.R         Splits, folds, change matrices, preprocessing
-ml_helpers.R              Disk artifacts, ENET worker, XGB process launch
-scripts/run_xgb.py        Python XGBoost and Optuna worker
-reporting_helpers.R       Descriptive summaries and randomization reports
-INPUTS_OUTPUTS.md         User-facing input and artifact schemas
-run_tests.R               Test-suite entrypoint
-test_feature_correctness.R
-test_validation.R
-test_end_to_end.R
-test_demo_run.R
-```
-
-Function locations:
-
-| File | Key functions |
-|:---|:---|
-| `main.R` | `FAST_treatment_ML()`, `FAST_treatment_ML_reports()`, `.prepare_inputs()`, `.validate_ml_args()` |
-| `validation_helpers.R` | `.validate_omics_type()`, `.validate_pheno()`, `.validate_omics()`, `.validate_dnam_probe_coverage()`, `.subset_omics_list()` |
-| `feature_helpers.R` | `.stratified_subject_split()`, `.stratified_subject_folds()`, `.prepare_fu_change_dataset()`, preprocessing helpers |
-| `ml_helpers.R` | `.run_ml_disk()`, `.write_prepared_dataset()`, `.run_enet_worker()`, `.run_xgb_worker()` |
-| `scripts/run_xgb.py` | `require_deps()`, `auc()`, `main()` |
-| `reporting_helpers.R` | `.generate_reports()` and report constructors |
+1. [Main Functions](#main-functions)
+2. [Accepted Inputs](#accepted-inputs)
+3. [Validation Flow](#validation-flow)
+4. [High-Level Modeling Flow](#high-level-modeling-flow)
+5. [Subject Splitting and CV Folds](#subject-splitting-and-cv-folds)
+6. [Follow-Up Feature Construction](#follow-up-feature-construction)
+7. [Preprocessing](#preprocessing)
+8. [Model-Specific Feature Sets](#model-specific-feature-sets)
+9. [ENET Worker](#enet-worker)
+10. [XGB Worker](#xgb-worker)
+11. [Disk Artifacts and Manifest](#disk-artifacts-and-manifest)
+12. [DNAm Handling](#dnam-handling)
+13. [Reporting Pipeline](#reporting-pipeline)
+14. [Tests](#tests)
 
 ---
 
@@ -79,13 +48,34 @@ FAST_treatment_ML <- function(
   models = c("enet", "xgb"),
   output_dir = NULL,
   test_frac = 0.2,
-  cv_folds = 5L,
-  seed = 1L,
+  enet_cv_folds = 5L,
+  xgb_cv_folds = 5L,
+  xgb_cv_repeats = 3L,
+  xgb_n_trials = 50L,
   n_cores = NULL,
   python_bin = NULL,
-  xgb_n_trials = 0L
+  seed = 1L
 )
 ```
+
+Arguments:
+
+| Argument | Default | Meaning |
+|:---|:---|:---|
+| `pheno` | Required | Phenotype data frame or matrix. Rows represent samples. It must contain `SAMPLE_ID`, `SUBJECT_ID`, `FU`, `TREATMENT_GROUP`, and `FEMALE`. Subjects must have a baseline and at least one follow-up. |
+| `omics` | Required | Omics data frame or matrix. Rows represent analytes, `ANALYTE_NAME` identifies each row, and remaining numeric columns are named by `pheno$SAMPLE_ID`. |
+| `omics_type` | `"Proteomics"` | One of `"Proteomics"`, `"Metabolomics"`, or `"DNAm"`. It controls preprocessing reminders and DNAm probe filtering; it does not transform input values. |
+| `additional_covariates` | `NULL` | Character vector naming phenotype columns to include as covariates. ENET receives all requested covariates as unpenalized features. XGB receives only `FEMALE`, and only when it is explicitly requested here. Rows missing a requested covariate are removed during validation. |
+| `models` | `c("enet", "xgb")` | Character vector selecting models to fit. Accepted values are `"enet"` and `"xgb"`. One or both may be requested; duplicates are removed. |
+| `output_dir` | `NULL` | Directory for model matrices, metadata, model outputs, and `manifest.json`. When `NULL`, a timestamped directory under `runs/` is created. An existing directory is reused; the function does not clear it first. |
+| `test_frac` | `0.2` | Fraction of subjects in each treatment arm assigned to the held-out test set. Must be greater than `0` and less than `0.5`. At least one subject per arm is assigned to test while at least one remains in training. |
+| `enet_cv_folds` | `5L` | Requested number of treatment-stratified ENET folds within the training set. Must be at least `2`. The actual count is reduced when the smaller training arm contains fewer subjects. |
+| `xgb_cv_folds` | `5L` | Requested number of treatment-stratified XGB folds in each repeat. Must be at least `2`. Each repeat receives an independently seeded fold assignment. |
+| `xgb_cv_repeats` | `3L` | Number of independent XGB CV fold assignments used to evaluate each parameter set. Must be at least `1`. Trial selection uses mean AUC across repeats and records repeat variability. |
+| `xgb_n_trials` | `50L` | Number of Optuna hyperparameter trials for XGB. Each trial is evaluated across all XGB CV repeats. `0` skips Optuna and evaluates the fixed parameters with the same repeated-CV scheme. |
+| `n_cores` | `NULL` | Thread count passed to XGBoost. When `NULL`, defaults to one fewer than the detected core count, with a minimum of one. ENET fitting is not parallelized by this argument. |
+| `python_bin` | `NULL` | Python executable used to launch the internal XGB worker. When `NULL`, `"python3"` is used. The selected environment must contain the required Python packages. This argument is irrelevant when XGB is not requested. |
+| `seed` | `1L` | Reproducibility seed. It controls the train/test split, CV fold assignment, ENET fitting, XGBoost, and Optuna sampling. Follow-up-specific work uses `seed + fu_level`. |
 
 What it does:
 
@@ -99,25 +89,6 @@ What it does:
    write artifacts.
 8. Returns the run manifest.
 
-Accepted model names are `enet` and `xgb`. Duplicate names are removed.
-
-The top-level return value is a list shaped like:
-
-```r
-list(
-  output_dir = ...,
-  target = "TREATMENT_GROUP",
-  feature_mode = "change",
-  requested_models = ...,
-  test_frac = ...,
-  cv_folds = ...,
-  seed = ...,
-  additional_covariates = ...,
-  followups = list(FU1 = ..., FU2 = ...),
-  manifest_path = ...
-)
-```
-
 ### `FAST_treatment_ML_reports()`
 
 File: `main.R`
@@ -130,6 +101,15 @@ FAST_treatment_ML_reports <- function(
   additional_covariates = NULL
 )
 ```
+
+Arguments:
+
+| Argument | Default | Meaning |
+|:---|:---|:---|
+| `pheno` | Required | The same phenotype structure accepted by `FAST_treatment_ML()`. Validation, covariate filtering, and subject-completeness requirements are identical. |
+| `omics` | Required | The same analyte-by-sample omics structure accepted by `FAST_treatment_ML()`. Samples are intersected with the validated phenotype data. |
+| `omics_type` | `"Proteomics"` | One of `"Proteomics"`, `"Metabolomics"`, or `"DNAm"`. DNAm reports use the same reliable-probe restriction as modeling. |
+| `additional_covariates` | `NULL` | Character vector naming phenotype variables to summarize and assess for baseline treatment-arm balance. Rows missing these variables are removed through the shared validation path. |
 
 This function uses the same validation and DNAm handling as the modeling
 pipeline, then calls `.generate_reports()`. It does not create model matrices,
@@ -174,7 +154,8 @@ Important constraints:
 
 - `models` contains one or both of `enet`, `xgb`.
 - `test_frac` is greater than `0` and less than `0.5`.
-- `cv_folds` is at least `2`.
+- `enet_cv_folds` and `xgb_cv_folds` are at least `2`.
+- `xgb_cv_repeats` is at least `1`.
 - `n_cores` is `NULL` or at least `1`.
 - `xgb_n_trials` is non-negative.
 
@@ -238,10 +219,11 @@ FAST_treatment_ML()
 ├── .prepare_inputs()
 │
 └── .run_ml_disk()
-    ├── create one stratified subject-level train/test split
     ├── find every nonzero FU level
     │
     └── for each FU k
+        ├── retain subjects with baseline and FU k
+        ├── create an FU-specific stratified train/test split
         ├── .prepare_fu_change_dataset()
         ├── write exact model-ready matrices and metadata
         ├── [enet requested] .run_enet_worker()
@@ -251,9 +233,10 @@ FAST_treatment_ML()
     └── write manifest.json
 ```
 
-One initial train/test subject split is reused across follow-ups. At a specific
-follow-up, subjects without both baseline and that follow-up are removed from
-that follow-up's prepared dataset.
+Each follow-up receives its own train/test split. The split is created only from
+subjects with both baseline and that specific follow-up, so treatment balance
+and test-set credibility are assessed against the cohort actually available for
+that model.
 
 There are no male/female model loops.
 
@@ -263,7 +246,9 @@ There are no male/female model loops.
 
 ### Train/Test Split
 
-`.stratified_subject_split()` works on one row per `SUBJECT_ID`.
+For each follow-up, `.stratified_subject_split()` works on one row per eligible
+`SUBJECT_ID`. Eligibility requires both baseline and the follow-up being
+modeled.
 
 For each treatment arm:
 
@@ -279,27 +264,29 @@ both sets.
 `.run_ml_disk()` requires at least:
 
 ```r
-max(2L, cv_folds)
+max(2L, enet_cv_folds, xgb_cv_folds)
 ```
 
-subjects per treatment arm before creating the split. If this condition fails,
-the pipeline stops.
+eligible subjects per treatment arm before creating the split. If this
+condition fails, that follow-up is skipped while other follow-ups may continue.
 
 ### Cross-Validation Folds
 
 `.stratified_subject_folds()` assigns training subjects to folds separately
 within each treatment arm.
 
-The requested fold count is reduced to the size of the smaller treatment arm:
+For each model, the requested fold count is reduced to the size of the smaller
+treatment arm:
 
 ```r
-actual_folds <- min(cv_folds, min(class_counts))
+actual_folds <- min(requested_folds, min(class_counts))
 ```
 
-The same fold assignments are written to `subjects.csv` and consumed by both
-ENET and XGB.
+ENET receives one fold assignment, written to `subjects.csv` as
+`ENET_FOLD_ID`. XGB receives `xgb_cv_repeats` independently seeded assignments,
+written to `xgb_folds.csv` as `SUBJECT_ID`, `REPEAT`, and `FOLD_ID`.
 
-The train/test split uses `seed`; follow-up preparation and model fitting use
+The train/test split, fold assignment, and model fitting for a follow-up use
 `seed + fu_level`.
 
 ---
@@ -429,7 +416,7 @@ glmnet::cv.glmnet(
   y = y_train,
   family = "binomial",
   alpha = 0.5,
-  foldid = foldid,
+  foldid = enet_foldid,
   type.measure = "deviance",
   standardize = FALSE,
   penalty.factor = penalty_factor,
@@ -491,6 +478,7 @@ The Python worker reads:
 - `xgb_train.csv.gz`
 - `xgb_test.csv.gz`
 - `subjects.csv`
+- `xgb_folds.csv`
 
 It requires `numpy`, `pandas`, `scikit-learn`, and `xgboost`. `optuna` is
 required only when `xgb_n_trials > 0`.
@@ -511,12 +499,16 @@ lambda             10.0
 alpha              1.0
 ```
 
-`xgb.cv()` uses the fold assignments created in R, up to 500 boosting rounds,
-and early stopping after 25 rounds without improvement.
+For each parameter set, `xgb.cv()` runs once per predefined repeat using up to
+500 boosting rounds and early stopping after 25 rounds without improvement.
+The parameter set is scored by mean best AUC across repeats. CV AUC SD is
+retained as a stability diagnostic, and the median repeat-specific best
+iteration is used to fit the final model.
 
 ### Optuna Tuning
 
-When `xgb_n_trials > 0`, each trial tunes:
+By default, `xgb_n_trials = 50` and `xgb_cv_repeats = 3`, producing 150 XGBoost
+CV evaluations per follow-up. Each trial tunes:
 
 - `max_depth`
 - `eta`
@@ -531,12 +523,13 @@ iteration are used for the final model.
 
 ### XGB Outputs
 
-- `metrics.csv`: AUCs, best iteration, feature count, and all selected
-  parameters as `PARAM_*` columns.
+- `metrics.csv`: mean and SD repeated-CV AUC, repeat count, test and in-sample
+  AUC, median best iteration, feature count, and selected parameters.
 - `predictions.csv`: train and test probabilities.
 - `importance.csv`: gain importance and feature type.
-- `tuning.csv`: Optuna trial history, or raw XGBoost CV history when tuning is
-  disabled.
+- `tuning.csv`: trial-level mean and SD AUC, per-repeat AUC and best iteration,
+  median best iteration, and parameter values. With tuning disabled, it has one
+  row for the fixed parameter set.
 - `model.json`: serialized XGBoost model.
 
 If the Python process exits nonzero, R stops with the worker exit status while
@@ -557,6 +550,7 @@ output_dir/
     xgb_train.csv.gz
     xgb_test.csv.gz
     subjects.csv
+    xgb_folds.csv
     preprocessing.csv
     enet/
       metrics.csv
@@ -582,7 +576,17 @@ This is the shared row map for model matrices:
 | `FU` | Follow-up modeled |
 | `SET` | `train` or `test` |
 | `TREATMENT_GROUP` | Binary prediction target |
-| `FOLD_ID` | CV fold for training rows; missing for test rows |
+| `ENET_FOLD_ID` | ENET CV fold for training rows; missing for test rows |
+
+### `xgb_folds.csv`
+
+This file preserves every repeated XGB fold assignment:
+
+| Column | Meaning |
+|:---|:---|
+| `SUBJECT_ID` | Training subject |
+| `REPEAT` | Repeat number |
+| `FOLD_ID` | Fold within the repeat |
 
 ### Manifest
 

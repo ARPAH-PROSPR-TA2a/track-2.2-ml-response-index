@@ -11,7 +11,9 @@ prepared <- .prepare_fu_change_dataset(
   fu_level = 1L,
   split = fixture$split,
   additional_covariates = c("FEMALE", "age"),
-  cv_folds = 2L,
+  enet_cv_folds = 2L,
+  xgb_cv_folds = 2L,
+  xgb_cv_repeats = 3L,
   seed = 1L
 )
 
@@ -69,6 +71,12 @@ missing_idx <- match("omics::missing_change", colnames(prepared$xgb_x_train))
   colnames(prepared$enet_x_train),
   "preprocessing rows match retained ENET features"
 )
+.expect_true(
+  length(prepared$enet_foldid) == length(prepared$subject_ids_train) &&
+    nrow(prepared$xgb_folds) == length(prepared$subject_ids_train) * 3L &&
+    identical(sort(unique(prepared$xgb_folds$REPEAT)), 1:3),
+  "ENET and repeated XGB folds are prepared separately"
+)
 
 missing_visit_pheno <- fixture$pheno[
   !(fixture$pheno$SUBJECT_ID == "S4" & fixture$pheno$FU == 1),
@@ -81,7 +89,9 @@ prepared_missing <- .prepare_fu_change_dataset(
     train_subjects = paste0("S", 1:6),
     test_subjects = paste0("S", 7:8)
   ),
-  cv_folds = 2L,
+  enet_cv_folds = 2L,
+  xgb_cv_folds = 2L,
+  xgb_cv_repeats = 3L,
   seed = 1L
 )
 .expect_true(

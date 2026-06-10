@@ -4,7 +4,8 @@ source("feature_helpers.R")
 source("ml_helpers.R")
 
 
-.validate_ml_args <- function(models, test_frac, cv_folds, seed, n_cores, xgb_n_trials) {
+.validate_ml_args <- function(models, test_frac, enet_cv_folds, xgb_cv_folds,
+                              xgb_cv_repeats, seed, n_cores, xgb_n_trials) {
   allowed_models <- c("enet", "xgb")
   if (!is.character(models) || length(models) == 0L ||
       any(!models %in% allowed_models)) {
@@ -16,8 +17,16 @@ source("ml_helpers.R")
     stop("test_frac must be a single numeric value greater than 0 and less than 0.5.")
   }
 
-  if (!is.numeric(cv_folds) || length(cv_folds) != 1L || cv_folds < 2L) {
-    stop("cv_folds must be a single integer >= 2.")
+  if (!is.numeric(enet_cv_folds) || length(enet_cv_folds) != 1L || enet_cv_folds < 2L) {
+    stop("enet_cv_folds must be a single integer >= 2.")
+  }
+
+  if (!is.numeric(xgb_cv_folds) || length(xgb_cv_folds) != 1L || xgb_cv_folds < 2L) {
+    stop("xgb_cv_folds must be a single integer >= 2.")
+  }
+
+  if (!is.numeric(xgb_cv_repeats) || length(xgb_cv_repeats) != 1L || xgb_cv_repeats < 1L) {
+    stop("xgb_cv_repeats must be a single integer >= 1.")
   }
 
   if (!is.numeric(seed) || length(seed) != 1L) {
@@ -61,13 +70,18 @@ FAST_treatment_ML <- function(pheno,
                               models = c("enet", "xgb"),
                               output_dir = NULL,
                               test_frac = 0.2,
-                              cv_folds = 5L,
-                              seed = 1L,
+                              enet_cv_folds = 5L,
+                              xgb_cv_folds = 5L,
+                              xgb_cv_repeats = 3L,
+                              xgb_n_trials = 50L,
                               n_cores = NULL,
                               python_bin = NULL,
-                              xgb_n_trials = 0L) {
+                              seed = 1L) {
 
-  models <- .validate_ml_args(models, test_frac, cv_folds, seed, n_cores, xgb_n_trials)
+  models <- .validate_ml_args(
+    models, test_frac, enet_cv_folds, xgb_cv_folds, xgb_cv_repeats,
+    seed, n_cores, xgb_n_trials
+  )
   if (is.null(n_cores)) {
     n_cores <- max(1L, parallel::detectCores() - 1L)
   }
@@ -88,7 +102,9 @@ FAST_treatment_ML <- function(pheno,
     models = models,
     output_dir = output_dir,
     test_frac = test_frac,
-    cv_folds = as.integer(cv_folds),
+    enet_cv_folds = as.integer(enet_cv_folds),
+    xgb_cv_folds = as.integer(xgb_cv_folds),
+    xgb_cv_repeats = as.integer(xgb_cv_repeats),
     seed = as.integer(seed),
     n_cores = as.integer(n_cores),
     python_bin = python_bin,

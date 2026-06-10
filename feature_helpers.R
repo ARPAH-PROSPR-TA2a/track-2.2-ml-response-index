@@ -181,7 +181,9 @@
 
 .prepare_fu_change_dataset <- function(pheno_df, omics_df, fu_level, split,
                                        additional_covariates = NULL,
-                                       cv_folds = 5L,
+                                       enet_cv_folds = 5L,
+                                       xgb_cv_folds = 5L,
+                                       xgb_cv_repeats = 3L,
                                        seed = 1L) {
   fu_num <- as.integer(as.character(pheno_df$FU))
   pheno_baseline <- pheno_df[fu_num == 0L, ]
@@ -263,9 +265,34 @@
     xgb_test <- cbind(xgb_test, xgb_covariates$test)
   }
 
-  foldid <- .stratified_subject_folds(train_subjects, y[train_idx], cv_folds = cv_folds, seed = seed)
-  if (is.null(foldid)) {
-    warning("FU", fu_level, ": unable to create stratified CV folds.")
+  enet_foldid <- .stratified_subject_folds(
+    train_subjects,
+    y[train_idx],
+    cv_folds = enet_cv_folds,
+    seed = seed
+  )
+  if (is.null(enet_foldid)) {
+    warning("FU", fu_level, ": unable to create stratified ENET CV folds.")
+    return(NULL)
+  }
+
+  xgb_fold_rows <- lapply(seq_len(xgb_cv_repeats), function(repeat_id) {
+    foldid <- .stratified_subject_folds(
+      train_subjects,
+      y[train_idx],
+      cv_folds = xgb_cv_folds,
+      seed = seed + repeat_id
+    )
+    if (is.null(foldid)) return(NULL)
+    data.frame(
+      SUBJECT_ID = train_subjects,
+      REPEAT = repeat_id,
+      FOLD_ID = foldid,
+      stringsAsFactors = FALSE
+    )
+  })
+  if (any(vapply(xgb_fold_rows, is.null, logical(1)))) {
+    warning("FU", fu_level, ": unable to create repeated stratified XGB CV folds.")
     return(NULL)
   }
 
@@ -275,7 +302,8 @@
     subject_ids_test = test_subjects,
     y_train = y[train_idx],
     y_test = y[test_idx],
-    foldid = foldid,
+    enet_foldid = enet_foldid,
+    xgb_folds = do.call(rbind, xgb_fold_rows),
     enet_x_train = enet_train,
     enet_x_test = enet_test,
     xgb_x_train = xgb_train,
