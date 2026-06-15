@@ -17,7 +17,7 @@ manifest <- FAST_treatment_ML(
   pheno = pheno,
   omics = omics,
   omics_type = "Proteomics",
-  additional_covariates = c("FEMALE", "agebl", "mbmi"),
+  additional_covariates = c("agebl", "mbmi"),
   models = c("enet", "xgb"),
   output_dir = "runs/trial_a_treatment_ml",
   test_frac = 0.2,
@@ -43,9 +43,10 @@ omics(FU k) - omics(FU 0)
 
 Train/test splits and CV folds are subject-level and stratified by treatment.
 
-ENET receives omics changes plus every requested `additional_covariates`
-variable. XGB receives omics changes plus `FEMALE` when `FEMALE` is explicitly
-requested; other covariates are excluded from XGB.
+ENET receives omics changes, `FEMALE`, and every requested
+`additional_covariates` variable. XGB receives omics changes plus `FEMALE`;
+other covariates are excluded from XGB. If `FEMALE` has zero variance in the
+training set for a follow-up, preprocessing removes it from both models.
 
 Feature columns use `omics::` and `covariate::` prefixes.
 
@@ -69,7 +70,9 @@ The Python environment must provide `numpy`, `pandas`, `scikit-learn`,
 ### ENET
 
 `glmnet::cv.glmnet()` fits a binomial elastic-net model. Omics coefficients are
-penalized; requested covariates are included with `penalty.factor = 0`.
+penalized; `FEMALE` and requested covariates are included with
+`penalty.factor = 0`. The final model uses `lambda.min`, selected by minimum
+cross-validated binomial deviance; out-of-fold AUC is reported at that lambda.
 Outputs include metrics, subject predictions, and coefficients sufficient to
 reproduce predictions without a saved R model object.
 
@@ -78,9 +81,10 @@ reproduce predictions without a saved R model object.
 XGB runs through `scripts/run_xgb.py`. Each parameter set is evaluated across
 `xgb_cv_repeats` independent stratified fold assignments and scored by mean CV
 AUC. By default, 50 Optuna trials are evaluated across three 5-fold repeats.
-Setting `xgb_n_trials = 0` evaluates the fixed defaults with the same repeated
-CV scheme. Outputs include metrics and selected parameters, predictions,
-feature importance, tuning history, and the fitted JSON model.
+XGB always uses Optuna tuning: at least 10 trials are required, and fewer than
+30 produce a limited-search warning. Outputs include metrics and selected
+parameters, predictions, feature importance, tuning history, and the fitted
+JSON model.
 
 ## DNAm
 
@@ -153,7 +157,7 @@ reports <- FAST_treatment_ML_reports(
   pheno = pheno,
   omics = omics,
   omics_type = "Proteomics",
-  additional_covariates = c("FEMALE", "agebl", "mbmi")
+  additional_covariates = c("agebl", "mbmi")
 )
 ```
 

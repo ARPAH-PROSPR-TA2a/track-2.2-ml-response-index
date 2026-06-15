@@ -14,7 +14,7 @@ manifest <- suppressWarnings(FAST_treatment_ML(
   pheno = fixture$pheno,
   omics = fixture$omics,
   omics_type = "Proteomics",
-  additional_covariates = c("FEMALE", "age", "bmi", "site", "smoker"),
+  additional_covariates = c("age", "bmi", "site", "smoker"),
   models = c("enet", "xgb"),
   output_dir = output_dir,
   test_frac = 0.2,
@@ -23,7 +23,7 @@ manifest <- suppressWarnings(FAST_treatment_ML(
   xgb_cv_repeats = 3L,
   seed = 2202L,
   n_cores = 1L,
-  xgb_n_trials = 3L,
+  xgb_n_trials = 10L,
   python_bin = "python"
 ))
 
@@ -167,7 +167,7 @@ reports <- suppressWarnings(FAST_treatment_ML_reports(
   pheno = fixture$pheno,
   omics = fixture$omics,
   omics_type = "Proteomics",
-  additional_covariates = c("FEMALE", "age", "bmi", "site", "smoker")
+  additional_covariates = c("age", "bmi", "site", "smoker")
 ))
 .expect_true(
   identical(

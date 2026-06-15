@@ -37,8 +37,17 @@ source("ml_helpers.R")
     stop("n_cores must be NULL or a single integer >= 1.")
   }
 
-  if (!is.numeric(xgb_n_trials) || length(xgb_n_trials) != 1L || xgb_n_trials < 0L) {
-    stop("xgb_n_trials must be a single integer >= 0.")
+  if ("xgb" %in% models &&
+      (!is.numeric(xgb_n_trials) || length(xgb_n_trials) != 1L ||
+       !is.finite(xgb_n_trials) || xgb_n_trials != as.integer(xgb_n_trials) ||
+       xgb_n_trials < 10L)) {
+    stop("xgb_n_trials must be a single integer >= 10 when XGB is requested.")
+  }
+  if ("xgb" %in% models && xgb_n_trials < 30L) {
+    warning(
+      "xgb_n_trials below 30 provides a limited hyperparameter search; ",
+      "30 or more trials are recommended."
+    )
   }
 
   unique(models)
@@ -93,12 +102,14 @@ FAST_treatment_ML <- function(pheno,
     python_bin <- "python3"
   }
 
+  model_covariates <- unique(c("FEMALE", additional_covariates))
   inputs <- .prepare_inputs(pheno, omics, omics_type, additional_covariates)
 
   manifest <- .run_ml_disk(
     pheno_df = inputs$pheno_list$all,
     omics_df = inputs$omics_list$all,
     additional_covariates = additional_covariates,
+    model_covariates = model_covariates,
     models = models,
     output_dir = output_dir,
     test_frac = test_frac,

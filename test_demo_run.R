@@ -104,7 +104,7 @@ manifest <- FAST_treatment_ML(
   pheno = demo$pheno,
   omics = demo$omics,
   omics_type = "Proteomics",
-  additional_covariates = c("FEMALE", "age", "bmi", "site", "smoker"),
+  additional_covariates = c("age", "bmi", "site", "smoker"),
   models = c("enet", "xgb"),
   output_dir = output_dir,
   test_frac = 0.2,
@@ -125,7 +125,7 @@ reports <- FAST_treatment_ML_reports(
   pheno = demo$pheno,
   omics = demo$omics,
   omics_type = "Proteomics",
-  additional_covariates = c("FEMALE", "age", "bmi", "site", "smoker")
+  additional_covariates = c("age", "bmi", "site", "smoker")
 )
 
 cat("Report objects:\n")

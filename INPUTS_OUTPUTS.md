@@ -15,7 +15,8 @@ Required columns:
 | `FEMALE` | Binary sex indicator, `0/1` |
 
 Variables named through `additional_covariates` must be numeric, factor, or
-logical. Request `FEMALE` explicitly to include sex in the models.
+logical. `FEMALE` is included in the models automatically and does not need to
+be listed in `additional_covariates`.
 
 ### `omics`
 
@@ -32,12 +33,12 @@ For every nonzero follow-up:
 omics_change = omics at FU k - omics at FU 0
 ```
 
-- ENET: omics changes plus all requested covariates.
-- XGB: omics changes plus `FEMALE` when requested.
+- ENET: omics changes plus `FEMALE` and all requested covariates.
+- XGB: omics changes plus `FEMALE`.
 
 No baseline or level omics features are included. Processing removes all-missing
 training features, then uses training-set medians, variance filtering, centers,
-and scales.
+and scales. This removes `FEMALE` when it has zero training variance.
 
 DNAm is restricted to the reliable probe list in
 `Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds`.
@@ -133,6 +134,10 @@ and paths to every emitted artifact.
 - `N_NONZERO`
 - `N_UNPENALIZED`
 
+`LAMBDA` is `cv.glmnet()`'s deviance-selected `lambda.min`. `CV_AUC` is the
+pooled out-of-fold AUC at that lambda. `LAMBDA_1SE` is recorded for reference
+but is not used for the final model.
+
 `enet/predictions.csv` contains:
 
 - `SET`
@@ -166,8 +171,8 @@ parameters.
 - `FEATURE_TYPE`
 
 `xgb/tuning.csv` contains mean and SD CV AUC, per-repeat AUCs and best
-iterations, median best iteration, and parameters for every Optuna trial. When
-tuning is disabled, it contains one row for the fixed parameter set.
+iterations, median best iteration, and parameters for every Optuna trial. XGB
+requires at least 10 trials; fewer than 30 produce a limited-search warning.
 
 `xgb/model.json` is the fitted XGBoost model.
 

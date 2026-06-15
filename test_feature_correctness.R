@@ -10,7 +10,7 @@ prepared <- .prepare_fu_change_dataset(
   omics_df = fixture$omics,
   fu_level = 1L,
   split = fixture$split,
-  additional_covariates = c("FEMALE", "age"),
+  model_covariates = "age",
   enet_cv_folds = 2L,
   xgb_cv_folds = 2L,
   xgb_cv_repeats = 3L,
@@ -80,14 +80,54 @@ missing_idx <- match("omics::missing_change", colnames(prepared$xgb_x_train))
   "training-zero-variance omics features are removed"
 )
 .expect_true(
-  any(startsWith(colnames(prepared$enet_x_train), "covariate::")),
-  "ENET includes requested covariates"
+  "covariate::FEMALE" %in% colnames(prepared$enet_x_train) &&
+    any(startsWith(colnames(prepared$enet_x_train), "covariate::age")),
+  "ENET includes FEMALE and requested additional covariates"
 )
 .expect_true(
   "covariate::FEMALE" %in% colnames(prepared$xgb_x_train) &&
     sum(startsWith(colnames(prepared$xgb_x_train), "covariate::FEMALE")) == 1L &&
     !any(startsWith(colnames(prepared$xgb_x_train), "covariate::age")),
-  "XGB includes one FEMALE column and excludes other covariates"
+  "XGB includes FEMALE by default and excludes other covariates"
+)
+.expect_true(
+  {
+    duplicate_female <- .prepare_fu_change_dataset(
+      pheno_df = fixture$pheno,
+      omics_df = fixture$omics,
+      fu_level = 1L,
+      split = fixture$split,
+      model_covariates = c("FEMALE", "FEMALE", "age"),
+      enet_cv_folds = 2L,
+      xgb_cv_folds = 2L,
+      xgb_cv_repeats = 1L,
+      seed = 1L
+    )
+    sum(startsWith(colnames(duplicate_female$enet_x_train), "covariate::FEMALE")) == 1L &&
+      sum(startsWith(colnames(duplicate_female$xgb_x_train), "covariate::FEMALE")) == 1L
+  },
+  "explicit FEMALE entries do not create duplicate model features"
+)
+
+constant_female_pheno <- fixture$pheno
+constant_female_pheno$FEMALE[
+  constant_female_pheno$SUBJECT_ID %in% fixture$split$train_subjects
+] <- factor(0L, levels = 0:1)
+constant_female <- .prepare_fu_change_dataset(
+  pheno_df = constant_female_pheno,
+  omics_df = fixture$omics,
+  fu_level = 1L,
+  split = fixture$split,
+  model_covariates = "age",
+  enet_cv_folds = 2L,
+  xgb_cv_folds = 2L,
+  xgb_cv_repeats = 1L,
+  seed = 1L
+)
+.expect_true(
+  !any(startsWith(colnames(constant_female$enet_x_train), "covariate::FEMALE")) &&
+    !any(startsWith(colnames(constant_female$xgb_x_train), "covariate::FEMALE")),
+  "training-zero-variance FEMALE is removed from both models"
 )
 .expect_equal(
   prepared$preprocessing$FEATURE_NAME,

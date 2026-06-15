@@ -78,15 +78,9 @@
     keep = TRUE
   )
 
-  cv_aucs <- apply(cv_fit$fit.preval, 2, function(pred) .safe_auc(dataset$y_train, pred))
-  if (all(is.na(cv_aucs))) {
-    lambda <- cv_fit$lambda.min
-    cv_auc <- NA_real_
-  } else {
-    best_idx <- which.max(cv_aucs)
-    lambda <- cv_fit$lambda[best_idx]
-    cv_auc <- cv_aucs[best_idx]
-  }
+  lambda <- cv_fit$lambda.min
+  lambda_idx <- which.min(abs(cv_fit$lambda - lambda))
+  cv_auc <- .safe_auc(dataset$y_train, cv_fit$fit.preval[, lambda_idx])
 
   fit <- cv_fit$glmnet.fit
   train_pred <- as.numeric(predict(fit, newx = dataset$enet_x_train, s = lambda, type = "response"))
@@ -159,7 +153,7 @@
 
 
 .run_xgb_worker <- function(fu_dir, out_dir, python_bin = "python3",
-                            n_trials = 0L, seed = 1L, n_cores = 1L) {
+                            n_trials = 50L, seed = 1L, n_cores = 1L) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   args <- c(
@@ -187,6 +181,7 @@
 
 
 .run_ml_disk <- function(pheno_df, omics_df, additional_covariates = NULL,
+                         model_covariates = "FEMALE",
                          models = c("enet", "xgb"), output_dir,
                          test_frac = 0.2, enet_cv_folds = 5L,
                          xgb_cv_folds = 5L, xgb_cv_repeats = 3L, seed = 1L,
@@ -205,6 +200,7 @@
     xgb_n_trials = xgb_n_trials,
     seed = seed,
     additional_covariates = additional_covariates,
+    model_covariates = model_covariates,
     followups = list()
   )
 
@@ -247,7 +243,7 @@
       omics_df = omics_df,
       fu_level = fu_level,
       split = split,
-      additional_covariates = additional_covariates,
+      model_covariates = model_covariates,
       enet_cv_folds = enet_cv_folds,
       xgb_cv_folds = xgb_cv_folds,
       xgb_cv_repeats = xgb_cv_repeats,
@@ -290,8 +286,7 @@
 
     if ("xgb" %in% models) {
       message(
-        fu_key, ": fitting XGB",
-        if (xgb_n_trials > 0L) paste0(" with ", xgb_n_trials, " Optuna trials.") else "."
+        fu_key, ": fitting XGB with ", xgb_n_trials, " Optuna trials."
       )
       fu_manifest$models$xgb <- .run_xgb_worker(
         fu_dir = fu_dir,

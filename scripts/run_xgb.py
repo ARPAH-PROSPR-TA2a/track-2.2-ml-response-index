@@ -62,8 +62,11 @@ def main():
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--nthread", type=int, default=1)
-    parser.add_argument("--n-trials", type=int, default=0)
+    parser.add_argument("--n-trials", type=int, default=50)
     args = parser.parse_args()
+
+    if args.n_trials < 10:
+        raise ValueError("--n-trials must be at least 10.")
 
     require_deps()
 
@@ -98,13 +101,6 @@ def main():
     params = {
         "objective": "binary:logistic",
         "eval_metric": "auc",
-        "max_depth": 2,
-        "eta": 0.03,
-        "min_child_weight": 5,
-        "subsample": 0.8,
-        "colsample_bytree": 0.6,
-        "lambda": 10.0,
-        "alpha": 1.0,
         "nthread": max(1, args.nthread),
         "seed": args.seed,
     }
@@ -134,76 +130,56 @@ def main():
             "repeat_iterations": repeat_iterations,
         }
 
-    tuning_path = out_dir / "tuning.csv"
-    if args.n_trials > 0:
-        try:
-            import optuna
-        except ImportError as exc:
-            raise RuntimeError("n_trials > 0 requires the Python package 'optuna'.") from exc
+    try:
+        import optuna
+    except ImportError as exc:
+        raise RuntimeError("XGB tuning requires the Python package 'optuna'.") from exc
 
-        def objective(trial):
-            trial_params = dict(params)
-            trial_params.update(
-                {
-                    "max_depth": trial.suggest_int("max_depth", 1, 4),
-                    "eta": trial.suggest_float("eta", 0.005, 0.08, log=True),
-                    "min_child_weight": trial.suggest_float("min_child_weight", 2, 25, log=True),
-                    "subsample": trial.suggest_float("subsample", 0.55, 0.95),
-                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.25, 0.85),
-                    "lambda": trial.suggest_float("lambda", 1, 100, log=True),
-                    "alpha": trial.suggest_float("alpha", 0.01, 20, log=True),
-                }
-            )
-            result = evaluate_repeated_cv(trial_params)
-            trial.set_user_attr("cv_auc_sd", result["sd_auc"])
-            trial.set_user_attr("best_iteration", result["best_iteration"])
-            for index, value in enumerate(result["repeat_aucs"], start=1):
-                trial.set_user_attr(f"repeat_{index}_auc", value)
-            for index, value in enumerate(result["repeat_iterations"], start=1):
-                trial.set_user_attr(f"repeat_{index}_best_iteration", value)
-            return result["mean_auc"]
-
-        sampler = optuna.samplers.TPESampler(seed=args.seed)
-        study = optuna.create_study(direction="maximize", sampler=sampler)
-        study.optimize(objective, n_trials=args.n_trials)
-        params.update(study.best_params)
-        best_iteration = int(study.best_trial.user_attrs["best_iteration"])
-        cv_auc = float(study.best_value)
-        cv_auc_sd = float(study.best_trial.user_attrs["cv_auc_sd"])
-
-        tuning_rows = []
-        for trial in study.trials:
-            row = {
-                "TRIAL": trial.number,
-                "STATE": trial.state.name,
-                "CV_AUC_MEAN": trial.value,
-                "CV_AUC_SD": trial.user_attrs.get("cv_auc_sd"),
-                "BEST_ITERATION_MEDIAN": trial.user_attrs.get("best_iteration"),
+    def objective(trial):
+        trial_params = dict(params)
+        trial_params.update(
+            {
+                "max_depth": trial.suggest_int("max_depth", 1, 4),
+                "eta": trial.suggest_float("eta", 0.005, 0.08, log=True),
+                "min_child_weight": trial.suggest_float("min_child_weight", 2, 25, log=True),
+                "subsample": trial.suggest_float("subsample", 0.55, 0.95),
+                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.25, 0.85),
+                "lambda": trial.suggest_float("lambda", 1, 100, log=True),
+                "alpha": trial.suggest_float("alpha", 0.01, 20, log=True),
             }
-            for key, value in sorted(trial.user_attrs.items()):
-                if key.startswith("repeat_"):
-                    row[key.upper()] = value
-            row.update({f"PARAM_{key.upper()}": value for key, value in trial.params.items()})
-            tuning_rows.append(row)
-        pd.DataFrame(tuning_rows).to_csv(tuning_path, index=False)
-    else:
-        result = evaluate_repeated_cv(params)
-        best_iteration = result["best_iteration"]
-        cv_auc = result["mean_auc"]
-        cv_auc_sd = result["sd_auc"]
-        tuning_row = {
-            "TRIAL": 0,
-            "STATE": "FIXED_PARAMETERS",
-            "CV_AUC_MEAN": cv_auc,
-            "CV_AUC_SD": cv_auc_sd,
-            "BEST_ITERATION_MEDIAN": best_iteration,
-        }
+        )
+        result = evaluate_repeated_cv(trial_params)
+        trial.set_user_attr("cv_auc_sd", result["sd_auc"])
+        trial.set_user_attr("best_iteration", result["best_iteration"])
         for index, value in enumerate(result["repeat_aucs"], start=1):
-            tuning_row[f"REPEAT_{index}_AUC"] = value
+            trial.set_user_attr(f"repeat_{index}_auc", value)
         for index, value in enumerate(result["repeat_iterations"], start=1):
-            tuning_row[f"REPEAT_{index}_BEST_ITERATION"] = value
-        tuning_row.update({f"PARAM_{key.upper()}": value for key, value in params.items()})
-        pd.DataFrame([tuning_row]).to_csv(tuning_path, index=False)
+            trial.set_user_attr(f"repeat_{index}_best_iteration", value)
+        return result["mean_auc"]
+
+    sampler = optuna.samplers.TPESampler(seed=args.seed)
+    study = optuna.create_study(direction="maximize", sampler=sampler)
+    study.optimize(objective, n_trials=args.n_trials)
+    params.update(study.best_params)
+    best_iteration = int(study.best_trial.user_attrs["best_iteration"])
+    cv_auc = float(study.best_value)
+    cv_auc_sd = float(study.best_trial.user_attrs["cv_auc_sd"])
+
+    tuning_rows = []
+    for trial in study.trials:
+        row = {
+            "TRIAL": trial.number,
+            "STATE": trial.state.name,
+            "CV_AUC_MEAN": trial.value,
+            "CV_AUC_SD": trial.user_attrs.get("cv_auc_sd"),
+            "BEST_ITERATION_MEDIAN": trial.user_attrs.get("best_iteration"),
+        }
+        for key, value in sorted(trial.user_attrs.items()):
+            if key.startswith("repeat_"):
+                row[key.upper()] = value
+        row.update({f"PARAM_{key.upper()}": value for key, value in trial.params.items()})
+        tuning_rows.append(row)
+    pd.DataFrame(tuning_rows).to_csv(out_dir / "tuning.csv", index=False)
 
     model = xgb.train(params, dtrain, num_boost_round=best_iteration, verbose_eval=False)
     train_pred = model.predict(dtrain)

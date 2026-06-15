@@ -197,7 +197,7 @@
 
 
 .prepare_fu_change_dataset <- function(pheno_df, omics_df, fu_level, split,
-                                       additional_covariates = NULL,
+                                       model_covariates = "FEMALE",
                                        enet_cv_folds = 5L,
                                        xgb_cv_folds = 5L,
                                        xgb_cv_repeats = 3L,
@@ -254,7 +254,8 @@
 
   train_pheno <- pheno_followup[train_idx, , drop = FALSE]
   test_pheno <- pheno_followup[test_idx, , drop = FALSE]
-  covariates <- .prepare_covariate_matrices(train_pheno, test_pheno, additional_covariates)
+  model_covariates <- unique(c("FEMALE", model_covariates))
+  covariates <- .prepare_covariate_matrices(train_pheno, test_pheno, model_covariates)
   if (!is.null(covariates$train)) {
     colnames(covariates$train) <- paste0("covariate::", colnames(covariates$train))
     colnames(covariates$test) <- colnames(covariates$train)
@@ -268,17 +269,14 @@
     enet_test <- cbind(enet_test, covariates$test)
   }
 
-  xgb_covariates <- NULL
-  if ("FEMALE" %in% additional_covariates) {
-    female_columns <- startsWith(colnames(covariates$train), "covariate::FEMALE")
-    xgb_covariates <- list(
-      train = covariates$train[, female_columns, drop = FALSE],
-      test = covariates$test[, female_columns, drop = FALSE]
-    )
-  }
+  female_columns <- startsWith(colnames(covariates$train), "covariate::FEMALE")
+  xgb_covariates <- list(
+    train = covariates$train[, female_columns, drop = FALSE],
+    test = covariates$test[, female_columns, drop = FALSE]
+  )
   xgb_train <- scaled$train
   xgb_test <- scaled$test
-  if (!is.null(xgb_covariates)) {
+  if (ncol(xgb_covariates$train) > 0L) {
     xgb_train <- cbind(xgb_train, xgb_covariates$train)
     xgb_test <- cbind(xgb_test, xgb_covariates$test)
   }

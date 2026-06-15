@@ -39,6 +39,61 @@ names(no_overlap)[-1] <- paste0("OTHER_", seq_len(ncol(no_overlap) - 1L))
   "omics without shared samples are rejected"
 )
 
+.expect_error(
+  .validate_ml_args(
+    models = "xgb",
+    test_frac = 0.2,
+    enet_cv_folds = 5L,
+    xgb_cv_folds = 5L,
+    xgb_cv_repeats = 3L,
+    seed = 1L,
+    n_cores = 1L,
+    xgb_n_trials = 9L
+  ),
+  "xgb_n_trials must be a single integer >= 10 when XGB is requested",
+  "XGB rejects fewer than 10 tuning trials"
+)
+
+trial_warning <- NULL
+invisible(withCallingHandlers(
+  .validate_ml_args(
+    models = "xgb",
+    test_frac = 0.2,
+    enet_cv_folds = 5L,
+    xgb_cv_folds = 5L,
+    xgb_cv_repeats = 3L,
+    seed = 1L,
+    n_cores = 1L,
+    xgb_n_trials = 20L
+  ),
+  warning = function(w) {
+    trial_warning <<- conditionMessage(w)
+    invokeRestart("muffleWarning")
+  }
+))
+.expect_true(
+  identical(
+    trial_warning,
+    "xgb_n_trials below 30 provides a limited hyperparameter search; 30 or more trials are recommended."
+  ),
+  "XGB warns when fewer than 30 tuning trials are requested"
+)
+
+.expect_equal(
+  suppressWarnings(.validate_ml_args(
+    models = "enet",
+    test_frac = 0.2,
+    enet_cv_folds = 5L,
+    xgb_cv_folds = 5L,
+    xgb_cv_repeats = 3L,
+    seed = 1L,
+    n_cores = 1L,
+    xgb_n_trials = 0L
+  )),
+  "enet",
+  "ENET-only runs ignore the XGB trial setting"
+)
+
 too_small <- data.frame(
   SUBJECT_ID = paste0("S", 1:6),
   TREATMENT_GROUP = factor(c(0, 0, 0, 1, 1, 1), levels = 0:1)

@@ -11,9 +11,6 @@ The current public functions are:
 - `FAST_treatment_ML_reports()`: runs the shared validation stack and returns
   descriptive and randomization reports without fitting models.
 
-The pipeline is all-subject only. Reporting may produce male and female
-summaries, but modeling is not sex-stratified.
-
 ## Table of Contents
 
 1. [Overview and Public API](#overview-and-public-api)
@@ -106,7 +103,7 @@ Both public functions accept the same four input arguments:
 | `pheno` | Required | Sample-level phenotype and treatment data. |
 | `omics` | Required | Analyte-by-sample numeric measurements. |
 | `omics_type` | `"Proteomics"` | Selects `"Proteomics"`, `"Metabolomics"`, or `"DNAm"` handling. It does not transform input values. |
-| `additional_covariates` | `NULL` | Phenotype columns used as model covariates or reporting variables. Rows missing a requested covariate are removed during validation. |
+| `additional_covariates` | `NULL` | Optional phenotype columns used as model covariates or reporting variables. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during validation. |
 
 The complete user-facing contract is in `INPUTS_OUTPUTS.md`. The details below
 focus on how the code prepares those inputs.
@@ -214,7 +211,7 @@ The modeling-only controls are:
 | `enet_cv_folds` | `5L` | Requests the ENET fold count. |
 | `xgb_cv_folds` | `5L` | Requests the XGB fold count per repeat. |
 | `xgb_cv_repeats` | `3L` | Sets the number of independent XGB fold assignments. |
-| `xgb_n_trials` | `50L` | Sets the Optuna trial count; `0` uses fixed parameters. |
+| `xgb_n_trials` | `50L` | Sets the required Optuna search size. XGB requires at least `10`; values below `30` produce a warning. |
 | `n_cores` | `NULL` | Sets XGBoost threads; `NULL` uses one fewer than the detected core count. |
 | `python_bin` | `NULL` | Selects the XGB Python executable; `NULL` uses `python3`. |
 | `seed` | `1L` | Controls splitting, folds, model fitting, and tuning. |
@@ -376,8 +373,9 @@ For each retained preprocessed feature, `preprocessing.csv` records:
 Removed features are omitted.
 
 ENET uses every feature represented in this file. XGB uses the omics features
-plus `FEMALE` when it was explicitly requested, so every XGB feature has a
-corresponding row even when other rows are ENET-only.
+plus `FEMALE`, so every XGB feature has a corresponding row even when other rows
+are ENET-only. If `FEMALE` has zero training variance, it is absent from both
+models and from this file.
 
 ---
 
@@ -395,7 +393,7 @@ covariate::<model.matrix column>
 ENET receives:
 
 ```text
-all retained omics changes + all requested additional covariates
+all retained omics changes + FEMALE + all requested additional covariates
 ```
 
 Factor and logical covariates are expanded with `model.matrix(~ . - 1)`.
@@ -406,11 +404,12 @@ XGB receives:
 
 ```text
 all retained omics changes
-+ FEMALE only when FEMALE was explicitly requested
++ FEMALE
 ```
 
 Other requested covariates are intentionally excluded from XGB. Consequently,
-the ENET and XGB matrices can have different column counts.
+the ENET and XGB matrices can have different column counts. `FEMALE` is subject
+to the same training-only variance filtering as every other covariate.
 
 `preprocessing.csv` describes the complete ENET feature set. Every XGB feature
 is a subset of those rows.
@@ -451,14 +450,16 @@ Covariates are therefore included as unpenalized adjustment features.
 
 ### Lambda Selection
 
-Although `cv.glmnet()` is run with deviance, the worker calculates AUC for each
-lambda from `fit.preval` and selects the lambda with the highest CV AUC. If all
-CV AUC values are unavailable, it falls back to `lambda.min`.
+`cv.glmnet()` selects `lambda.min`, the lambda with the lowest mean
+cross-validated binomial deviance. The worker then calculates pooled
+out-of-fold AUC from `fit.preval` at that selected lambda for reporting; AUC
+does not influence lambda selection. `lambda.1se` is retained as a reference
+value but is not used to fit the final model.
 
 ### ENET Outputs
 
-- `metrics.csv`: CV, test, and in-sample AUC; selected lambda; `lambda.1se`;
-  alpha; feature counts.
+- `metrics.csv`: pooled out-of-fold, test, and in-sample AUC; selected
+  `lambda.min`; `lambda.1se`; alpha; feature counts.
 - `predictions.csv`: train and test probabilities with subject IDs and labels.
 - `weights.csv`: intercept, nonzero omics coefficients, and every unpenalized
   covariate coefficient.
@@ -493,46 +494,38 @@ The Python worker reads:
 - `subjects.csv`
 - `xgb_folds.csv`
 
-It requires `numpy`, `pandas`, `scikit-learn`, and `xgboost`. `optuna` is
-required only when `xgb_n_trials > 0`.
+It requires `numpy`, `pandas`, `scikit-learn`, `xgboost`, and `optuna`.
 
-### Fixed Defaults
+### Training and Search Settings
 
-Without Optuna tuning, XGB starts with:
+All XGB runs use:
 
 ```text
 objective          binary:logistic
 eval_metric        auc
-max_depth          2
-eta                0.03
-min_child_weight   5
-subsample          0.8
-colsample_bytree   0.6
-lambda             10.0
-alpha              1.0
 ```
 
-For each parameter set, `xgb.cv()` runs once per predefined repeat using up to
-500 boosting rounds and early stopping after 25 rounds without improvement.
-The parameter set is scored by mean best AUC across repeats. CV AUC SD is
-retained as a stability diagnostic, and the median repeat-specific best
-iteration is used to fit the final model.
+Optuna tunes:
 
-### Optuna Tuning
+| Parameter | Search range |
+|:---|:---|
+| `max_depth` | Integer `1` to `4` |
+| `eta` | Log-uniform `0.005` to `0.08` |
+| `min_child_weight` | Log-uniform `2` to `25` |
+| `subsample` | Uniform `0.55` to `0.95` |
+| `colsample_bytree` | Uniform `0.25` to `0.85` |
+| `lambda` | Log-uniform `1` to `100` |
+| `alpha` | Log-uniform `0.01` to `20` |
+
+For each trial, `xgb.cv()` runs once per predefined repeat using up to 500
+boosting rounds and early stopping after 25 rounds without improvement. The
+trial is scored by mean best AUC across repeats. CV AUC SD is retained as a
+stability diagnostic, and the median repeat-specific best iteration is used to
+fit the final model.
 
 By default, `xgb_n_trials = 50` and `xgb_cv_repeats = 3`, producing 150 XGBoost
-CV evaluations per follow-up. Each trial tunes:
-
-- `max_depth`
-- `eta`
-- `min_child_weight`
-- `subsample`
-- `colsample_bytree`
-- `lambda`
-- `alpha`
-
-The objective is maximum cross-validated AUC. The best parameters and best
-iteration are used for the final model.
+CV evaluations per follow-up. At least 10 trials are required; fewer than 30
+produce a warning because the search is limited.
 
 ### XGB Outputs
 
@@ -541,8 +534,7 @@ iteration are used for the final model.
 - `predictions.csv`: train and test probabilities.
 - `importance.csv`: gain importance and feature type.
 - `tuning.csv`: trial-level mean and SD AUC, per-repeat AUC and best iteration,
-  median best iteration, and parameter values. With tuning disabled, it has one
-  row for the fixed parameter set.
+  median best iteration, and parameter values.
 - `model.json`: serialized XGBoost model.
 
 If the Python process exits nonzero, R stops with the worker exit status while
