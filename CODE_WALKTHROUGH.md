@@ -240,8 +240,6 @@ subjects with both baseline and that specific follow-up, so treatment balance
 and test-set credibility are assessed against the cohort actually available for
 that model.
 
-There are no male/female model loops.
-
 ---
 
 ## Subject Splitting and CV Folds
@@ -353,24 +351,25 @@ than `1e-12`. Test-set variance does not affect feature retention.
 values transform train and test. Missing or zero standard deviations are
 replaced by `1`.
 
-### Preprocessing Metadata
+### Preprocessing Audit
 
-For each retained preprocessed feature, `preprocessing.csv` records:
+For each candidate omics or encoded covariate feature, `preprocessing.csv`
+records:
 
 | Column | Meaning |
 |:---|:---|
 | `FEATURE_NAME` | Final prefixed model-matrix column |
 | `FEATURE_TYPE` | `omics` or `covariate` |
+| `STATUS` | `retained`, `all_missing_training`, or `zero_variance_training` |
 | `MEDIAN` | Training imputation median |
 | `CENTER` | Training mean after imputation/filtering |
 | `SCALE` | Training standard deviation |
+| `IN_ENET` | Whether ENET receives the feature |
+| `IN_XGB` | Whether XGB receives the feature |
 
-Removed features are omitted.
-
-ENET uses every feature represented in this file. XGB uses the omics features
-plus `FEMALE`, so every XGB feature has a corresponding row even when other rows
-are ENET-only. If `FEMALE` has zero training variance, it is absent from both
-models and from this file.
+Removed features remain in the audit with their removal status and unavailable
+transformation values left blank. XGB uses retained omics features plus retained
+`FEMALE`; other retained covariates are ENET-only.
 
 ---
 
@@ -406,8 +405,8 @@ Other requested covariates are intentionally excluded from XGB. Consequently,
 the ENET and XGB matrices can have different column counts. `FEMALE` is subject
 to the same training-only variance filtering as every other covariate.
 
-`preprocessing.csv` describes the complete ENET feature set. Every XGB feature
-is a subset of those rows.
+The `IN_ENET` and `IN_XGB` columns in `preprocessing.csv` identify the retained
+feature set used by each model.
 
 ---
 
@@ -551,6 +550,8 @@ output_dir/
     xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
+    cohort.csv
+    change_summary.csv
     preprocessing.csv
     enet/
       metrics.csv
@@ -587,6 +588,21 @@ This file preserves every repeated XGB fold assignment:
 | `SUBJECT_ID` | Training subject |
 | `REPEAT` | Repeat number |
 | `FOLD_ID` | Fold within the repeat |
+
+### `cohort.csv`
+
+For the modeled follow-up, this file records subject, treatment-arm, and sex
+counts for:
+
+- `eligible`: subjects with baseline and the follow-up;
+- `train`: subjects assigned to model training;
+- `test`: subjects assigned to held-out evaluation.
+
+### `change_summary.csv`
+
+This file summarizes the raw, pre-imputation change matrix by `eligible`,
+`train`, and `test` set and by treatment arm. Each analyte row records subject
+count, nonmissing count, mean, median, SD, minimum, and maximum.
 
 ### Manifest
 

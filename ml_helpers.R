@@ -48,6 +48,8 @@
     file.path(fu_dir, "subjects.csv")
   )
   .write_csv(dataset$xgb_folds, file.path(fu_dir, "xgb_folds.csv"))
+  .write_csv(dataset$cohort, file.path(fu_dir, "cohort.csv"))
+  .write_csv(dataset$change_summary, file.path(fu_dir, "change_summary.csv"))
   .write_csv(dataset$preprocessing, file.path(fu_dir, "preprocessing.csv"))
 }
 
@@ -269,6 +271,8 @@
         xgb_test = file.path(fu_dir, "xgb_test.csv.gz"),
         subjects = file.path(fu_dir, "subjects.csv"),
         xgb_folds = file.path(fu_dir, "xgb_folds.csv"),
+        cohort = file.path(fu_dir, "cohort.csv"),
+        change_summary = file.path(fu_dir, "change_summary.csv"),
         preprocessing = file.path(fu_dir, "preprocessing.csv")
       ),
       models = list()

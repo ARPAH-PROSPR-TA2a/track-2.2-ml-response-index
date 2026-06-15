@@ -80,6 +80,10 @@ missing_idx <- match("omics::missing_change", colnames(prepared$xgb_x_train))
   "training-zero-variance omics features are removed"
 )
 .expect_true(
+  !"omics::all_missing_training" %in% colnames(prepared$xgb_x_train),
+  "all-missing training omics features are removed"
+)
+.expect_true(
   "covariate::FEMALE" %in% colnames(prepared$enet_x_train) &&
     any(startsWith(colnames(prepared$enet_x_train), "covariate::age")),
   "ENET includes FEMALE and requested additional covariates"
@@ -130,15 +134,101 @@ constant_female <- .prepare_fu_change_dataset(
   "training-zero-variance FEMALE is removed from both models"
 )
 .expect_equal(
-  prepared$preprocessing$FEATURE_NAME,
+  prepared$preprocessing$FEATURE_NAME[prepared$preprocessing$IN_ENET],
   colnames(prepared$enet_x_train),
-  "preprocessing rows match retained ENET features"
+  "preprocessing audit identifies retained ENET features"
+)
+.expect_equal(
+  prepared$preprocessing$FEATURE_NAME[prepared$preprocessing$IN_XGB],
+  colnames(prepared$xgb_x_train),
+  "preprocessing audit identifies retained XGB features"
+)
+.expect_equal(
+  prepared$preprocessing$STATUS[
+    prepared$preprocessing$FEATURE_NAME == "omics::constant_change"
+  ],
+  "zero_variance_training",
+  "preprocessing audit records zero-variance removals"
+)
+.expect_equal(
+  prepared$preprocessing$STATUS[
+    prepared$preprocessing$FEATURE_NAME == "omics::all_missing_training"
+  ],
+  "all_missing_training",
+  "preprocessing audit records all-missing removals"
+)
+.expect_true(
+  all(is.na(prepared$preprocessing[
+    prepared$preprocessing$STATUS == "all_missing_training",
+    c("MEDIAN", "CENTER", "SCALE")
+  ])),
+  "all-missing preprocessing rows have no learned parameters"
+)
+.expect_equal(
+  prepared$cohort$SET,
+  c("eligible", "train", "test"),
+  "cohort report contains eligible, train, and test rows"
+)
+.expect_equal(
+  prepared$cohort$N_SUBJECTS,
+  c(6L, 4L, 2L),
+  "cohort report counts aligned subjects by set"
+)
+.expect_equal(
+  prepared$cohort[, c("N_CONTROL", "N_TREATMENT", "N_MALE", "N_FEMALE")],
+  data.frame(
+    N_CONTROL = c(3L, 2L, 1L),
+    N_TREATMENT = c(3L, 2L, 1L),
+    N_MALE = c(3L, 2L, 1L),
+    N_FEMALE = c(3L, 2L, 1L)
+  ),
+  "cohort report counts treatment and sex by set"
+)
+
+train_control_feature <- prepared$change_summary[
+  prepared$change_summary$SET == "train" &
+    prepared$change_summary$TREATMENT_GROUP == 0L &
+    prepared$change_summary$ANALYTE_NAME == "feature_change",
+]
+.expect_equal(
+  train_control_feature[, c("N_SUBJECTS", "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX")],
+  data.frame(
+    N_SUBJECTS = 2L,
+    N_NONMISSING = 2L,
+    MEAN = 3,
+    MEDIAN = 3,
+    SD = sqrt(8),
+    MIN = 1,
+    MAX = 5
+  ),
+  "change summary uses raw pre-imputation changes"
+)
+.expect_true(
+  {
+    all_missing_train_rows <- prepared$change_summary[
+      prepared$change_summary$SET == "train" &
+        prepared$change_summary$ANALYTE_NAME == "all_missing_training",
+    ]
+    all(all_missing_train_rows$N_NONMISSING == 0L) &&
+      all(is.na(all_missing_train_rows$MEAN))
+  },
+  "change summary preserves raw missingness"
 )
 .expect_true(
   length(prepared$enet_foldid) == length(prepared$subject_ids_train) &&
     nrow(prepared$xgb_folds) == length(prepared$subject_ids_train) * 3L &&
     identical(sort(unique(prepared$xgb_folds$REPEAT)), 1:3),
   "ENET and repeated XGB folds are prepared separately"
+)
+
+artifact_dir <- tempfile("track22_prepared_")
+.write_prepared_dataset(prepared, artifact_dir)
+.expect_true(
+  all(file.exists(file.path(
+    artifact_dir,
+    c("cohort.csv", "change_summary.csv", "preprocessing.csv")
+  ))),
+  "ML reporting artifacts are written with prepared datasets"
 )
 
 missing_visit_pheno <- fixture$pheno[

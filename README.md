@@ -106,6 +106,8 @@ output_dir/
     xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
+    cohort.csv
+    change_summary.csv
     preprocessing.csv
     enet/
       metrics.csv
@@ -121,8 +123,10 @@ output_dir/
 
 The model-ready matrices contain exactly the columns consumed by each model.
 `subjects.csv` combines outcomes, train/test assignment, and ENET fold
-assignment. `xgb_folds.csv` stores every repeated XGB fold assignment. Run
-settings and artifact paths are stored once in `manifest.json`.
+assignment. `xgb_folds.csv` stores every repeated XGB fold assignment.
+`cohort.csv` records eligible/train/test counts, `change_summary.csv` describes
+raw change scores, and `preprocessing.csv` audits feature transformations and
+removals. Run settings and artifact paths are stored once in `manifest.json`.
 
 See `INPUTS_OUTPUTS.md` for schemas.
 

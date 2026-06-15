@@ -136,16 +136,130 @@
 }
 
 
-.make_preprocessing_table <- function(feature_type, prefix, medians, keep, center, scale) {
-  retained_names <- names(keep)[keep]
+.make_preprocessing_table <- function(feature_type, prefix, original_names,
+                                      nonmissing_keep, medians, variance_keep,
+                                      center, scale, xgb_feature_names) {
+  status <- rep("all_missing_training", length(original_names))
+  names(status) <- original_names
+
+  nonmissing_names <- names(nonmissing_keep)[nonmissing_keep]
+  retained_names <- names(variance_keep)[variance_keep]
+  status[nonmissing_names] <- "zero_variance_training"
+  status[retained_names] <- "retained"
+
+  median_values <- rep(NA_real_, length(original_names))
+  center_values <- rep(NA_real_, length(original_names))
+  scale_values <- rep(NA_real_, length(original_names))
+  names(median_values) <- names(center_values) <- names(scale_values) <- original_names
+  median_values[names(medians)] <- medians
+  center_values[names(center)] <- center
+  scale_values[names(scale)] <- scale
+
+  feature_names <- paste0(prefix, original_names)
   data.frame(
-    FEATURE_NAME = paste0(prefix, retained_names),
+    FEATURE_NAME = feature_names,
     FEATURE_TYPE = feature_type,
-    MEDIAN = as.numeric(medians[retained_names]),
-    CENTER = as.numeric(center[retained_names]),
-    SCALE = as.numeric(scale[retained_names]),
+    STATUS = unname(status),
+    MEDIAN = unname(median_values),
+    CENTER = unname(center_values),
+    SCALE = unname(scale_values),
+    IN_ENET = status == "retained",
+    IN_XGB = feature_names %in% xgb_feature_names,
     stringsAsFactors = FALSE
   )
+}
+
+
+.make_cohort_report <- function(pheno_followup, train_count) {
+  sets <- list(
+    eligible = seq_len(nrow(pheno_followup)),
+    train = seq_len(train_count),
+    test = seq.int(train_count + 1L, nrow(pheno_followup))
+  )
+
+  rows <- lapply(names(sets), function(set_name) {
+    cell <- pheno_followup[sets[[set_name]], , drop = FALSE]
+    treatment <- .as_binary_numeric(cell$TREATMENT_GROUP)
+    female <- .as_binary_numeric(cell$FEMALE)
+    data.frame(
+      FU = as.integer(as.character(cell$FU[1])),
+      SET = set_name,
+      N_SUBJECTS = nrow(cell),
+      N_CONTROL = sum(treatment == 0L),
+      N_TREATMENT = sum(treatment == 1L),
+      N_MALE = sum(female == 0L),
+      N_FEMALE = sum(female == 1L),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
+}
+
+
+.summarize_change_values <- function(values) {
+  observed <- values[!is.na(values)]
+  if (length(observed) == 0L) {
+    return(c(
+      N_NONMISSING = 0,
+      MEAN = NA_real_,
+      MEDIAN = NA_real_,
+      SD = NA_real_,
+      MIN = NA_real_,
+      MAX = NA_real_
+    ))
+  }
+
+  c(
+    N_NONMISSING = length(observed),
+    MEAN = mean(observed),
+    MEDIAN = median(observed),
+    SD = if (length(observed) > 1L) stats::sd(observed) else NA_real_,
+    MIN = min(observed),
+    MAX = max(observed)
+  )
+}
+
+
+.make_change_summary <- function(change_matrix, y, train_count, fu_level) {
+  sets <- list(
+    eligible = seq_len(nrow(change_matrix)),
+    train = seq_len(train_count),
+    test = seq.int(train_count + 1L, nrow(change_matrix))
+  )
+
+  rows <- list()
+  row_index <- 1L
+  for (set_name in names(sets)) {
+    set_idx <- sets[[set_name]]
+    for (treatment_group in 0:1) {
+      group_idx <- set_idx[y[set_idx] == treatment_group]
+      if (length(group_idx) == 0L) next
+
+      summaries <- t(apply(
+        change_matrix[group_idx, , drop = FALSE],
+        2,
+        .summarize_change_values
+      ))
+      rows[[row_index]] <- data.frame(
+        FU = fu_level,
+        SET = set_name,
+        TREATMENT_GROUP = treatment_group,
+        ANALYTE_NAME = colnames(change_matrix),
+        N_SUBJECTS = length(group_idx),
+        N_NONMISSING = as.integer(summaries[, "N_NONMISSING"]),
+        MEAN = summaries[, "MEAN"],
+        MEDIAN = summaries[, "MEDIAN"],
+        SD = summaries[, "SD"],
+        MIN = summaries[, "MIN"],
+        MAX = summaries[, "MAX"],
+        stringsAsFactors = FALSE
+      )
+      row_index <- row_index + 1L
+    }
+  }
+
+  do.call(rbind, rows)
 }
 
 
@@ -179,6 +293,11 @@
   imputed <- .impute_train_median(nonmissing$train, nonmissing$test)
   dropped <- .drop_zero_variance_train(imputed$train, imputed$test)
   scaled <- .scale_train_test(dropped$train, dropped$test)
+  retained_names <- colnames(scaled$train)
+  xgb_feature_names <- paste0(
+    "covariate::",
+    retained_names[startsWith(retained_names, "FEMALE")]
+  )
 
   list(
     train = scaled$train,
@@ -187,10 +306,13 @@
     preprocessing = .make_preprocessing_table(
       feature_type = "covariate",
       prefix = "covariate::",
+      original_names = colnames(train_mm),
+      nonmissing_keep = nonmissing$keep,
       medians = imputed$medians,
-      keep = dropped$keep,
+      variance_keep = dropped$keep,
       center = scaled$center,
-      scale = scaled$scale
+      scale = scaled$scale,
+      xgb_feature_names = xgb_feature_names
     )
   )
 }
@@ -241,13 +363,17 @@
   imputed <- .impute_train_median(nonmissing$train, nonmissing$test)
   dropped <- .drop_zero_variance_train(imputed$train, imputed$test)
   scaled <- .scale_train_test(dropped$train, dropped$test)
+  retained_omics <- paste0("omics::", colnames(scaled$train))
   omics_preprocessing <- .make_preprocessing_table(
     feature_type = "omics",
     prefix = "omics::",
+    original_names = colnames(omics_train),
+    nonmissing_keep = nonmissing$keep,
     medians = imputed$medians,
-    keep = dropped$keep,
+    variance_keep = dropped$keep,
     center = scaled$center,
-    scale = scaled$scale
+    scale = scaled$scale,
+    xgb_feature_names = retained_omics
   )
   colnames(scaled$train) <- paste0("omics::", colnames(scaled$train))
   colnames(scaled$test) <- colnames(scaled$train)
@@ -324,6 +450,13 @@
     enet_x_test = enet_test,
     xgb_x_train = xgb_train,
     xgb_x_test = xgb_test,
+    cohort = .make_cohort_report(pheno_followup, length(train_subjects)),
+    change_summary = .make_change_summary(
+      change_matrix,
+      y,
+      length(train_subjects),
+      fu_level
+    ),
     preprocessing = rbind(omics_preprocessing, covariates$preprocessing)
   )
 }

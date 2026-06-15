@@ -65,6 +65,7 @@
   feature_change <- c(1, 3, 5, 7, 9, 11, 13, 15)
   missing_change <- c(NA, 2, 4, 6, 100, 8, 10, 12)
   constant_change <- c(5, 5, 5, 5, 20, 20, 20, 20)
+  all_missing_training <- c(NA, NA, NA, NA, 30, 31, 32, 33)
   sample_ids <- pheno$SAMPLE_ID
 
   make_values <- function(changes) {
@@ -75,13 +76,19 @@
   }
 
   omics <- data.frame(
-    ANALYTE_NAME = c("feature_change", "missing_change", "constant_change"),
+    ANALYTE_NAME = c(
+      "feature_change",
+      "missing_change",
+      "constant_change",
+      "all_missing_training"
+    ),
     stringsAsFactors = FALSE
   )
   omics[sample_ids] <- rbind(
     make_values(feature_change),
     make_values(missing_change),
-    make_values(constant_change)
+    make_values(constant_change),
+    make_values(all_missing_training)
   )
 
   list(

@@ -45,6 +45,8 @@ enet_train <- read.csv(fu1$artifacts$enet_train, check.names = FALSE)
 enet_test <- read.csv(fu1$artifacts$enet_test, check.names = FALSE)
 xgb_train <- read.csv(fu1$artifacts$xgb_train, check.names = FALSE)
 xgb_test <- read.csv(fu1$artifacts$xgb_test, check.names = FALSE)
+cohort <- read.csv(fu1$artifacts$cohort, stringsAsFactors = FALSE)
+change_summary <- read.csv(fu1$artifacts$change_summary, stringsAsFactors = FALSE)
 preprocessing <- read.csv(fu1$artifacts$preprocessing, stringsAsFactors = FALSE)
 
 .expect_true(
@@ -79,13 +81,50 @@ preprocessing <- read.csv(fu1$artifacts$preprocessing, stringsAsFactors = FALSE)
 )
 .expect_true(
   identical(
-    names(preprocessing),
-    c("FEATURE_NAME", "FEATURE_TYPE", "MEDIAN", "CENTER", "SCALE")
+    names(cohort),
+    c(
+      "FU", "SET", "N_SUBJECTS", "N_CONTROL", "N_TREATMENT",
+      "N_MALE", "N_FEMALE"
+    )
   ) &&
-    identical(preprocessing$FEATURE_NAME, names(enet_train)) &&
-    all(is.finite(as.matrix(preprocessing[, c("MEDIAN", "CENTER", "SCALE")]))) &&
-    all(names(xgb_train) %in% preprocessing$FEATURE_NAME),
-  "preprocessing CSV describes retained model features"
+    identical(cohort$SET, c("eligible", "train", "test")) &&
+    cohort$N_SUBJECTS[cohort$SET == "eligible"] == nrow(subjects) &&
+    cohort$N_SUBJECTS[cohort$SET == "train"] == sum(subjects$SET == "train") &&
+    cohort$N_SUBJECTS[cohort$SET == "test"] == sum(subjects$SET == "test"),
+  "cohort artifact describes eligible, train, and test subjects"
+)
+.expect_true(
+  identical(
+    names(change_summary),
+    c(
+      "FU", "SET", "TREATMENT_GROUP", "ANALYTE_NAME", "N_SUBJECTS",
+      "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX"
+    )
+  ) &&
+    all(c("eligible", "train", "test") %in% change_summary$SET) &&
+    all(0:1 %in% change_summary$TREATMENT_GROUP) &&
+    all(change_summary$ANALYTE_NAME %in% fixture$omics$ANALYTE_NAME),
+  "change summary artifact describes raw changes by set and treatment"
+)
+.expect_true(
+  identical(
+    names(preprocessing),
+    c(
+      "FEATURE_NAME", "FEATURE_TYPE", "STATUS", "MEDIAN", "CENTER", "SCALE",
+      "IN_ENET", "IN_XGB"
+    )
+  ) &&
+    identical(preprocessing$FEATURE_NAME[preprocessing$IN_ENET], names(enet_train)) &&
+    identical(preprocessing$FEATURE_NAME[preprocessing$IN_XGB], names(xgb_train)) &&
+    all(
+      is.finite(as.matrix(
+        preprocessing[
+          preprocessing$STATUS == "retained",
+          c("MEDIAN", "CENTER", "SCALE")
+        ]
+      ))
+    ),
+  "preprocessing CSV audits retained and removed model features"
 )
 
 for (model_name in c("enet", "xgb")) {

@@ -55,6 +55,8 @@ output_dir/
     xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
+    cohort.csv
+    change_summary.csv
     preprocessing.csv
     enet/
       metrics.csv
@@ -101,19 +103,57 @@ Contains the repeated XGB cross-validation assignments:
 | `REPEAT` | XGB CV repeat number |
 | `FOLD_ID` | Treatment-stratified fold within that repeat |
 
+### `cohort.csv`
+
+Contains one row each for the FU-specific eligible, training, and test cohorts:
+
+| Column | Meaning |
+|:---|:---|
+| `FU` | Follow-up modeled |
+| `SET` | `eligible`, `train`, or `test` |
+| `N_SUBJECTS` | Number of subjects |
+| `N_CONTROL` | Control-arm subjects |
+| `N_TREATMENT` | Treatment-arm subjects |
+| `N_MALE` | Male subjects |
+| `N_FEMALE` | Female subjects |
+
+Eligibility requires both baseline and the modeled follow-up after input-level
+covariate filtering.
+
+### `change_summary.csv`
+
+Summarizes raw, pre-imputation omics changes by set and treatment arm:
+
+```text
+omics(FU k) - omics(FU 0)
+```
+
+| Column | Meaning |
+|:---|:---|
+| `FU` | Follow-up modeled |
+| `SET` | `eligible`, `train`, or `test` |
+| `TREATMENT_GROUP` | `0` or `1` |
+| `ANALYTE_NAME` | Omics feature |
+| `N_SUBJECTS` | Subjects in the set and treatment arm |
+| `N_NONMISSING` | Observed change values |
+| `MEAN`, `MEDIAN`, `SD`, `MIN`, `MAX` | Raw change-score statistics |
+
 ### `preprocessing.csv`
 
-Contains one row per retained ENET feature:
+Contains one row per candidate omics or encoded covariate feature:
 
 | Column | Meaning |
 |:---|:---|
 | `FEATURE_NAME` | Prefixed model-matrix column name |
 | `FEATURE_TYPE` | `omics` or `covariate` |
+| `STATUS` | `retained`, `all_missing_training`, or `zero_variance_training` |
 | `MEDIAN` | Training-set imputation median |
 | `CENTER` | Training-set centering value |
 | `SCALE` | Training-set scaling value |
+| `IN_ENET` | Whether the final ENET matrix contains the feature |
+| `IN_XGB` | Whether the final XGB matrix contains the feature |
 
-Removed features are omitted.
+Unavailable transformation values are blank for removed features.
 
 ### `manifest.json`
 
