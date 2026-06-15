@@ -7,24 +7,38 @@
 }
 
 
-.stratified_subject_split <- function(pheno_df, test_frac = 0.2, seed = 1L,
-                                      min_per_class = 2L) {
+.validate_followup_cohort <- function(pheno_df, test_frac, min_train_per_class) {
   subject_rows <- pheno_df[!duplicated(pheno_df$SUBJECT_ID), c("SUBJECT_ID", "TREATMENT_GROUP")]
   subject_rows$Y <- .as_binary_numeric(subject_rows$TREATMENT_GROUP)
 
   class_counts <- table(subject_rows$Y)
-  if (!all(c("0", "1") %in% names(class_counts)) ||
-      any(class_counts[c("0", "1")] < min_per_class)) {
-    warning("Skipping split: not enough subjects in both treatment arms.")
-    return(NULL)
+  if (!all(c("0", "1") %in% names(class_counts))) {
+    return("eligible subjects must include both treatment arms")
   }
+
+  class_counts <- as.integer(class_counts[c("0", "1")])
+  test_counts <- pmax(1L, floor(class_counts * test_frac))
+  train_counts <- class_counts - test_counts
+  if (any(train_counts < min_train_per_class)) {
+    return(paste0(
+      "each treatment arm must retain at least ", min_train_per_class,
+      " training subjects after the test split"
+    ))
+  }
+
+  NULL
+}
+
+
+.stratified_subject_split <- function(pheno_df, test_frac = 0.2, seed = 1L) {
+  subject_rows <- pheno_df[!duplicated(pheno_df$SUBJECT_ID), c("SUBJECT_ID", "TREATMENT_GROUP")]
+  subject_rows$Y <- .as_binary_numeric(subject_rows$TREATMENT_GROUP)
 
   set.seed(seed)
   test_subjects <- character(0)
   for (class_value in c(0L, 1L)) {
     ids <- subject_rows$SUBJECT_ID[subject_rows$Y == class_value]
     n_test <- max(1L, floor(length(ids) * test_frac))
-    n_test <- min(n_test, length(ids) - 1L)
     test_subjects <- c(test_subjects, sample(ids, n_test))
   }
 
@@ -45,13 +59,6 @@
   class_counts <- table(y)
   if (!all(c("0", "1") %in% names(class_counts))) {
     stop("CV requires both treatment arms.")
-  }
-
-  max_folds <- min(as.integer(class_counts[c("0", "1")]))
-  cv_folds <- min(as.integer(cv_folds), max_folds)
-  if (cv_folds < 2L) {
-    warning("Skipping CV: fewer than two subjects in at least one treatment arm.")
-    return(NULL)
   }
 
   set.seed(seed)

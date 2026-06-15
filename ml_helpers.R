@@ -224,17 +224,22 @@
       drop = FALSE
     ]
 
-    split <- .stratified_subject_split(
+    cohort_issue <- .validate_followup_cohort(
       split_pheno,
       test_frac = test_frac,
-      seed = seed + fu_level,
-      min_per_class = max(2L, enet_cv_folds, xgb_cv_folds)
+      min_train_per_class = max(enet_cv_folds, xgb_cv_folds)
     )
-    if (is.null(split)) {
-      warning(fu_key, ": unable to create a subject-level train/test split.")
+    if (!is.null(cohort_issue)) {
+      warning(fu_key, ": ", cohort_issue, ".")
       manifest$followups[[fu_key]] <- NULL
       next
     }
+
+    split <- .stratified_subject_split(
+      split_pheno,
+      test_frac = test_frac,
+      seed = seed + fu_level
+    )
 
     message(fu_key, ": preparing model-ready datasets.")
     prepared <- .prepare_fu_change_dataset(

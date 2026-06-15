@@ -16,24 +16,40 @@ summaries, but modeling is not sex-stratified.
 
 ## Table of Contents
 
-1. [Main Functions](#main-functions)
-2. [Accepted Inputs](#accepted-inputs)
-3. [Validation Flow](#validation-flow)
-4. [High-Level Modeling Flow](#high-level-modeling-flow)
-5. [Subject Splitting and CV Folds](#subject-splitting-and-cv-folds)
-6. [Follow-Up Feature Construction](#follow-up-feature-construction)
-7. [Preprocessing](#preprocessing)
-8. [Model-Specific Feature Sets](#model-specific-feature-sets)
-9. [ENET Worker](#enet-worker)
-10. [XGB Worker](#xgb-worker)
-11. [Disk Artifacts and Manifest](#disk-artifacts-and-manifest)
-12. [DNAm Handling](#dnam-handling)
-13. [Reporting Pipeline](#reporting-pipeline)
-14. [Tests](#tests)
+1. [Overview and Public API](#overview-and-public-api)
+2. [Shared Input Preparation](#shared-input-preparation)
+3. [Modeling Pipeline](#modeling-pipeline)
+4. [Subject Splitting and CV Folds](#subject-splitting-and-cv-folds)
+5. [Follow-Up Feature Construction](#follow-up-feature-construction)
+6. [Preprocessing](#preprocessing)
+7. [Model-Specific Feature Sets](#model-specific-feature-sets)
+8. [ENET Worker](#enet-worker)
+9. [XGB Worker](#xgb-worker)
+10. [Disk Artifacts and Manifest](#disk-artifacts-and-manifest)
+11. [Reporting Pipeline](#reporting-pipeline)
 
 ---
 
-## Main Functions
+## Overview and Public API
+
+Both public functions begin with the same input preparation:
+
+```text
+pheno + omics
+      │
+      ▼
+.prepare_inputs()
+      │
+      ├── FAST_treatment_ML()
+      │     └── split, construct features, preprocess, fit, write artifacts
+      │
+      └── FAST_treatment_ML_reports()
+            └── descriptive summaries and randomization reports
+```
+
+The shared arguments and preparation path are documented once in
+[Shared Input Preparation](#shared-input-preparation). The complete external
+input and output contract is in `INPUTS_OUTPUTS.md`.
 
 ### `FAST_treatment_ML()`
 
@@ -58,36 +74,9 @@ FAST_treatment_ML <- function(
 )
 ```
 
-Arguments:
-
-| Argument | Default | Meaning |
-|:---|:---|:---|
-| `pheno` | Required | Phenotype data frame or matrix. Rows represent samples. It must contain `SAMPLE_ID`, `SUBJECT_ID`, `FU`, `TREATMENT_GROUP`, and `FEMALE`. Subjects must have a baseline and at least one follow-up. |
-| `omics` | Required | Omics data frame or matrix. Rows represent analytes, `ANALYTE_NAME` identifies each row, and remaining numeric columns are named by `pheno$SAMPLE_ID`. |
-| `omics_type` | `"Proteomics"` | One of `"Proteomics"`, `"Metabolomics"`, or `"DNAm"`. It controls preprocessing reminders and DNAm probe filtering; it does not transform input values. |
-| `additional_covariates` | `NULL` | Character vector naming phenotype columns to include as covariates. ENET receives all requested covariates as unpenalized features. XGB receives only `FEMALE`, and only when it is explicitly requested here. Rows missing a requested covariate are removed during validation. |
-| `models` | `c("enet", "xgb")` | Character vector selecting models to fit. Accepted values are `"enet"` and `"xgb"`. One or both may be requested; duplicates are removed. |
-| `output_dir` | `NULL` | Directory for model matrices, metadata, model outputs, and `manifest.json`. When `NULL`, a timestamped directory under `runs/` is created. An existing directory is reused; the function does not clear it first. |
-| `test_frac` | `0.2` | Fraction of subjects in each treatment arm assigned to the held-out test set. Must be greater than `0` and less than `0.5`. At least one subject per arm is assigned to test while at least one remains in training. |
-| `enet_cv_folds` | `5L` | Requested number of treatment-stratified ENET folds within the training set. Must be at least `2`. The actual count is reduced when the smaller training arm contains fewer subjects. |
-| `xgb_cv_folds` | `5L` | Requested number of treatment-stratified XGB folds in each repeat. Must be at least `2`. Each repeat receives an independently seeded fold assignment. |
-| `xgb_cv_repeats` | `3L` | Number of independent XGB CV fold assignments used to evaluate each parameter set. Must be at least `1`. Trial selection uses mean AUC across repeats and records repeat variability. |
-| `xgb_n_trials` | `50L` | Number of Optuna hyperparameter trials for XGB. Each trial is evaluated across all XGB CV repeats. `0` skips Optuna and evaluates the fixed parameters with the same repeated-CV scheme. |
-| `n_cores` | `NULL` | Thread count passed to XGBoost. When `NULL`, defaults to one fewer than the detected core count, with a minimum of one. ENET fitting is not parallelized by this argument. |
-| `python_bin` | `NULL` | Python executable used to launch the internal XGB worker. When `NULL`, `"python3"` is used. The selected environment must contain the required Python packages. This argument is irrelevant when XGB is not requested. |
-| `seed` | `1L` | Reproducibility seed. It controls the train/test split, CV fold assignment, ENET fitting, XGBoost, and Optuna sampling. Follow-up-specific work uses `seed + fu_level`. |
-
-What it does:
-
-1. Validates model names and modeling arguments.
-2. Defaults `n_cores` to one fewer than the detected core count.
-3. Creates a timestamped `output_dir` when none is supplied.
-4. Defaults `python_bin` to `python3`.
-5. Runs shared phenotype and omics validation.
-6. Applies DNAm probe restriction when requested.
-7. Calls `.run_ml_disk()` to prepare each follow-up, fit requested models, and
-   write artifacts.
-8. Returns the run manifest.
+This is the modeling entry point. After shared input preparation, it calls
+`.run_ml_disk()` to process each follow-up, fit the requested models, write the
+artifacts, and return the run manifest.
 
 ### `FAST_treatment_ML_reports()`
 
@@ -102,24 +91,25 @@ FAST_treatment_ML_reports <- function(
 )
 ```
 
-Arguments:
-
-| Argument | Default | Meaning |
-|:---|:---|:---|
-| `pheno` | Required | The same phenotype structure accepted by `FAST_treatment_ML()`. Validation, covariate filtering, and subject-completeness requirements are identical. |
-| `omics` | Required | The same analyte-by-sample omics structure accepted by `FAST_treatment_ML()`. Samples are intersected with the validated phenotype data. |
-| `omics_type` | `"Proteomics"` | One of `"Proteomics"`, `"Metabolomics"`, or `"DNAm"`. DNAm reports use the same reliable-probe restriction as modeling. |
-| `additional_covariates` | `NULL` | Character vector naming phenotype variables to summarize and assess for baseline treatment-arm balance. Rows missing these variables are removed through the shared validation path. |
-
-This function uses the same validation and DNAm handling as the modeling
-pipeline, then calls `.generate_reports()`. It does not create model matrices,
-split subjects, or fit models.
+This is the reporting entry point. After the same shared input preparation, it
+calls `.generate_reports()`. It does not split subjects, create model matrices,
+or fit models.
 
 ---
 
-## Accepted Inputs
+## Shared Input Preparation
 
-The full user-facing contract is in `INPUTS_OUTPUTS.md`.
+Both public functions accept the same four input arguments:
+
+| Argument | Default | Role |
+|:---|:---|:---|
+| `pheno` | Required | Sample-level phenotype and treatment data. |
+| `omics` | Required | Analyte-by-sample numeric measurements. |
+| `omics_type` | `"Proteomics"` | Selects `"Proteomics"`, `"Metabolomics"`, or `"DNAm"` handling. It does not transform input values. |
+| `additional_covariates` | `NULL` | Phenotype columns used as model covariates or reporting variables. Rows missing a requested covariate are removed during validation. |
+
+The complete user-facing contract is in `INPUTS_OUTPUTS.md`. The details below
+focus on how the code prepares those inputs.
 
 ### Phenotype Data
 
@@ -147,21 +137,6 @@ or logical.
 
 Extra samples are allowed on either side. The validator retains the
 intersection of phenotype sample IDs and omics column names.
-
-### Modeling Arguments
-
-Important constraints:
-
-- `models` contains one or both of `enet`, `xgb`.
-- `test_frac` is greater than `0` and less than `0.5`.
-- `enet_cv_folds` and `xgb_cv_folds` are at least `2`.
-- `xgb_cv_repeats` is at least `1`.
-- `n_cores` is `NULL` or at least `1`.
-- `xgb_n_trials` is non-negative.
-
----
-
-## Validation Flow
 
 Both public functions call `.prepare_inputs()`.
 
@@ -208,9 +183,44 @@ code but is not used by this ML pipeline.
 Missing values and near-zero variance are reported here but handled later using
 training-only preprocessing for each follow-up.
 
+### DNAm Handling
+
+When `omics_type == "DNAm"`, `.prepare_inputs()` loads:
+
+```text
+Data/FAST_epicv1_epicv2_probe_list.rds
+Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
+```
+
+It validates that the input contains probes from both lists, then restricts
+modeling and reporting to the reliable Sugden/TruD probe list.
+
+Unlike the WAS tracks, this ML pipeline does not fit a full-probe model and then
+apply a filtered multiple-testing correction. Probe filtering happens during
+shared preparation, before either public function branches into modeling or
+reporting.
+
 ---
 
-## High-Level Modeling Flow
+## Modeling Pipeline
+
+The modeling-only controls are:
+
+| Argument | Default | Role |
+|:---|:---|:---|
+| `models` | `c("enet", "xgb")` | Selects one or both model workers. |
+| `output_dir` | `NULL` | Selects the artifact directory; `NULL` creates a timestamped directory under `runs/`. |
+| `test_frac` | `0.2` | Sets the treatment-stratified held-out fraction. |
+| `enet_cv_folds` | `5L` | Requests the ENET fold count. |
+| `xgb_cv_folds` | `5L` | Requests the XGB fold count per repeat. |
+| `xgb_cv_repeats` | `3L` | Sets the number of independent XGB fold assignments. |
+| `xgb_n_trials` | `50L` | Sets the Optuna trial count; `0` uses fixed parameters. |
+| `n_cores` | `NULL` | Sets XGBoost threads; `NULL` uses one fewer than the detected core count. |
+| `python_bin` | `NULL` | Selects the XGB Python executable; `NULL` uses `python3`. |
+| `seed` | `1L` | Controls splitting, folds, model fitting, and tuning. |
+
+`FAST_treatment_ML()` validates these controls, resolves their defaults, runs
+shared preparation, and enters `.run_ml_disk()`.
 
 ```text
 FAST_treatment_ML()
@@ -254,33 +264,26 @@ For each treatment arm:
 
 ```r
 n_test <- max(1L, floor(n_subjects_in_arm * test_frac))
-n_test <- min(n_test, n_subjects_in_arm - 1L)
 ```
 
 It samples test subjects separately within treatment arms, then defines all
 remaining subjects as training subjects. A subject therefore cannot appear in
 both sets.
 
-`.run_ml_disk()` requires at least:
+Before splitting, `.run_ml_disk()` validates that both treatment arms are
+present and that each arm will retain at least:
 
 ```r
-max(2L, enet_cv_folds, xgb_cv_folds)
+max(enet_cv_folds, xgb_cv_folds)
 ```
 
-eligible subjects per treatment arm before creating the split. If this
-condition fails, that follow-up is skipped while other follow-ups may continue.
+training subjects after the test allocation. If this condition fails, that
+follow-up is skipped while other follow-ups may continue.
 
 ### Cross-Validation Folds
 
 `.stratified_subject_folds()` assigns training subjects to folds separately
 within each treatment arm.
-
-For each model, the requested fold count is reduced to the size of the smaller
-treatment arm:
-
-```r
-actual_folds <- min(requested_folds, min(class_counts))
-```
 
 ENET receives one fold assignment, written to `subjects.csv` as
 `ENET_FOLD_ID`. XGB receives `xgb_cv_repeats` independently seeded assignments,
@@ -599,24 +602,6 @@ the in-memory manifest.
 
 ---
 
-## DNAm Handling
-
-When `omics_type == "DNAm"`, `.prepare_inputs()` loads:
-
-```text
-Data/FAST_epicv1_epicv2_probe_list.rds
-Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
-```
-
-It validates that the input contains probes from both lists, then restricts
-modeling and reporting to the reliable Sugden/TruD probe list.
-
-Unlike the WAS tracks, this ML pipeline does not fit a full-probe model and then
-apply a filtered multiple-testing correction. Probe filtering happens before
-feature construction.
-
----
-
 ## Reporting Pipeline
 
 `FAST_treatment_ML_reports()` returns:
@@ -656,36 +641,3 @@ Randomization reports use baseline data from the all-subject dataset:
   for factor/logical variables depending on cell counts.
 
 Reporting strata do not imply modeling strata.
-
----
-
-## Tests
-
-`run_tests.R` executes:
-
-1. `test_feature_correctness.R`
-2. `test_validation.R`
-3. `test_end_to_end.R`
-
-Coverage includes:
-
-- subject and outcome alignment;
-- train/test isolation;
-- follow-up-minus-baseline calculation;
-- training-only imputation, filtering, and scaling;
-- ENET/XGB feature boundaries;
-- validation failures;
-- artifact schemas and row counts;
-- ENET probability reconstruction from saved weights;
-- XGB model serialization and tuning output;
-- report return structure.
-
-Run:
-
-```bash
-Rscript run_tests.R
-```
-
-The test process must use a Python environment containing the dependencies
-needed by `scripts/run_xgb.py`. A larger inspectable smoke run is available in
-`test_demo_run.R`.
