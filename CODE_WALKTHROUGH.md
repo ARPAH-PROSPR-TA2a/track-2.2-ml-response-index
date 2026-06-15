@@ -192,11 +192,6 @@ Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
 It validates that the input contains probes from both lists, then restricts
 modeling and reporting to the reliable Sugden/TruD probe list.
 
-Unlike the WAS tracks, this ML pipeline does not fit a full-probe model and then
-apply a filtered multiple-testing correction. Probe filtering happens during
-shared preparation, before either public function branches into modeling or
-reporting.
-
 ---
 
 ## Modeling Pipeline
