@@ -330,19 +330,25 @@ values enter the models.
 
 ## Preprocessing
 
-Omics and requested covariates use the same three-stage preprocessing sequence:
+Omics and requested covariates use the same four-stage preprocessing sequence:
 
-1. Median imputation.
-2. Zero-variance filtering.
-3. Centering and scaling.
+1. Remove all-missing training features.
+2. Median imputation.
+3. Zero-variance filtering.
+4. Centering and scaling.
 
 All learned values come from the training set.
+
+### All-Missing Features
+
+`.drop_all_missing_train()` removes columns with no observed training values.
+The same columns are removed from the test set, even if test values are
+available.
 
 ### Median Imputation
 
 `.impute_train_median()` computes one median per training column and applies it
-to missing values in both train and test. An all-missing training column is
-temporarily assigned median `0`, then removed by variance filtering.
+to missing values in both train and test.
 
 ### Variance Filtering
 
@@ -357,7 +363,7 @@ replaced by `1`.
 
 ### Preprocessing Metadata
 
-For each retained ENET feature, `preprocessing.csv` records:
+For each retained preprocessed feature, `preprocessing.csv` records:
 
 | Column | Meaning |
 |:---|:---|
@@ -368,6 +374,10 @@ For each retained ENET feature, `preprocessing.csv` records:
 | `SCALE` | Training standard deviation |
 
 Removed features are omitted.
+
+ENET uses every feature represented in this file. XGB uses the omics features
+plus `FEMALE` when it was explicitly requested, so every XGB feature has a
+corresponding row even when other rows are ENET-only.
 
 ---
 

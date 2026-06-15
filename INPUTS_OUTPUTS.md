@@ -35,8 +35,9 @@ omics_change = omics at FU k - omics at FU 0
 - ENET: omics changes plus all requested covariates.
 - XGB: omics changes plus `FEMALE` when requested.
 
-No baseline or level omics features are included. Processing uses training-set
-medians, variance filtering, centers, and scales.
+No baseline or level omics features are included. Processing removes all-missing
+training features, then uses training-set medians, variance filtering, centers,
+and scales.
 
 DNAm is restricted to the reliable probe list in
 `Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds`.

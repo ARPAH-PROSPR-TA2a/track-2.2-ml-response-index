@@ -101,17 +101,26 @@
 }
 
 
+.drop_all_missing_train <- function(x_train, x_test) {
+  keep <- colSums(!is.na(x_train)) > 0L
+
+  list(
+    train = x_train[, keep, drop = FALSE],
+    test = x_test[, keep, drop = FALSE],
+    keep = keep
+  )
+}
+
+
 .impute_train_median <- function(x_train, x_test) {
   medians <- apply(x_train, 2, median, na.rm = TRUE)
-  all_na <- is.na(medians)
-  medians[all_na] <- 0
 
   for (j in seq_len(ncol(x_train))) {
     x_train[is.na(x_train[, j]), j] <- medians[j]
     x_test[is.na(x_test[, j]), j] <- medians[j]
   }
 
-  list(train = x_train, test = x_test, medians = medians, all_na = all_na)
+  list(train = x_train, test = x_test, medians = medians)
 }
 
 
@@ -166,7 +175,8 @@
   train_mm <- mm[seq_len(nrow(train_cov)), , drop = FALSE]
   test_mm <- mm[(nrow(train_cov) + 1L):nrow(mm), , drop = FALSE]
 
-  imputed <- .impute_train_median(train_mm, test_mm)
+  nonmissing <- .drop_all_missing_train(train_mm, test_mm)
+  imputed <- .impute_train_median(nonmissing$train, nonmissing$test)
   dropped <- .drop_zero_variance_train(imputed$train, imputed$test)
   scaled <- .scale_train_test(dropped$train, dropped$test)
 
@@ -227,7 +237,8 @@
 
   omics_train <- change_matrix[train_idx, , drop = FALSE]
   omics_test <- change_matrix[test_idx, , drop = FALSE]
-  imputed <- .impute_train_median(omics_train, omics_test)
+  nonmissing <- .drop_all_missing_train(omics_train, omics_test)
+  imputed <- .impute_train_median(nonmissing$train, nonmissing$test)
   dropped <- .drop_zero_variance_train(imputed$train, imputed$test)
   scaled <- .scale_train_test(dropped$train, dropped$test)
   omics_preprocessing <- .make_preprocessing_table(

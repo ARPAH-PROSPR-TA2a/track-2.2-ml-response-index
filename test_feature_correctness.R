@@ -25,6 +25,29 @@ prepared <- .prepare_fu_change_dataset(
   "train and test subjects do not overlap"
 )
 
+missing_only_in_train <- .drop_all_missing_train(
+  x_train = matrix(
+    c(NA, NA, 1, 2),
+    nrow = 2,
+    dimnames = list(NULL, c("all_missing", "retained"))
+  ),
+  x_test = matrix(
+    c(10, 11, 3, 4),
+    nrow = 2,
+    dimnames = list(NULL, c("all_missing", "retained"))
+  )
+)
+.expect_equal(
+  colnames(missing_only_in_train$train),
+  "retained",
+  "all-missing training features are removed before imputation"
+)
+.expect_equal(
+  colnames(missing_only_in_train$test),
+  "retained",
+  "test observations do not retain an all-missing training feature"
+)
+
 feature_idx <- match("omics::feature_change", colnames(prepared$xgb_x_train))
 expected_train <- as.numeric(scale(c(1, 3, 5, 7)))
 expected_test <- (c(9, 11) - mean(c(1, 3, 5, 7))) / sd(c(1, 3, 5, 7))
