@@ -7,9 +7,15 @@
   "enet_cv_folds": 5,
   "xgb_cv_folds": 5,
   "xgb_cv_repeats": 3,
-  "xgb_n_trials": 3,
+  "xgb_n_trials": 10,
   "seed": 2202,
-  "additional_covariates": ["FEMALE", "age", "bmi", "site", "smoker"],
+  "additional_covariates": ["age", "bmi", "site", "smoker"],
+  "model_covariates": ["FEMALE", "age", "bmi", "site", "smoker"],
+  "reports": {
+    "cohort": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/reports/cohort.csv",
+    "change_summary": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/reports/change_summary.csv",
+    "preprocessing": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/reports/preprocessing.csv"
+  },
   "followups": {
     "FU1": {
       "data_dir": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1",
@@ -19,8 +25,7 @@
         "xgb_train": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_train.csv.gz",
         "xgb_test": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_test.csv.gz",
         "subjects": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/subjects.csv",
-        "xgb_folds": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_folds.csv",
-        "preprocessing": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/preprocessing.csv"
+        "xgb_folds": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb_folds.csv"
       },
       "models": {
         "enet": {

@@ -48,9 +48,6 @@
     file.path(fu_dir, "subjects.csv")
   )
   .write_csv(dataset$xgb_folds, file.path(fu_dir, "xgb_folds.csv"))
-  .write_csv(dataset$cohort, file.path(fu_dir, "cohort.csv"))
-  .write_csv(dataset$change_summary, file.path(fu_dir, "change_summary.csv"))
-  .write_csv(dataset$preprocessing, file.path(fu_dir, "preprocessing.csv"))
 }
 
 
@@ -203,7 +200,17 @@
     seed = seed,
     additional_covariates = additional_covariates,
     model_covariates = model_covariates,
+    reports = list(
+      cohort = file.path(output_dir, "reports", "cohort.csv"),
+      change_summary = file.path(output_dir, "reports", "change_summary.csv"),
+      preprocessing = file.path(output_dir, "reports", "preprocessing.csv")
+    ),
     followups = list()
+  )
+  report_tables <- list(
+    cohort = list(),
+    change_summary = list(),
+    preprocessing = list()
   )
 
   fu_levels <- sort(unique(as.integer(as.character(pheno_df$FU))))
@@ -257,6 +264,9 @@
     }
 
     .write_prepared_dataset(prepared, fu_dir)
+    report_tables$cohort[[fu_key]] <- prepared$cohort
+    report_tables$change_summary[[fu_key]] <- prepared$change_summary
+    report_tables$preprocessing[[fu_key]] <- prepared$preprocessing
     message(
       fu_key, ": prepared ", length(prepared$subject_ids_train), " training and ",
       length(prepared$subject_ids_test), " test subjects."
@@ -270,10 +280,7 @@
         xgb_train = file.path(fu_dir, "xgb_train.csv.gz"),
         xgb_test = file.path(fu_dir, "xgb_test.csv.gz"),
         subjects = file.path(fu_dir, "subjects.csv"),
-        xgb_folds = file.path(fu_dir, "xgb_folds.csv"),
-        cohort = file.path(fu_dir, "cohort.csv"),
-        change_summary = file.path(fu_dir, "change_summary.csv"),
-        preprocessing = file.path(fu_dir, "preprocessing.csv")
+        xgb_folds = file.path(fu_dir, "xgb_folds.csv")
       ),
       models = list()
     )
@@ -304,6 +311,17 @@
     }
 
     manifest$followups[[fu_key]] <- fu_manifest
+  }
+
+  reports_dir <- file.path(output_dir, "reports")
+  dir.create(reports_dir, recursive = TRUE, showWarnings = FALSE)
+  for (report_name in names(report_tables)) {
+    if (length(report_tables[[report_name]]) > 0L) {
+      .write_csv(
+        do.call(rbind, report_tables[[report_name]]),
+        manifest$reports[[report_name]]
+      )
+    }
   }
 
   manifest_path <- file.path(output_dir, "manifest.json")

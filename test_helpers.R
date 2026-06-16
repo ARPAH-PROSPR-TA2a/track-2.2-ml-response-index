@@ -106,6 +106,7 @@
   set.seed(seed)
   subjects <- sprintf("SUBJ%03d", seq_len(n_subjects))
   treatment <- rep(0:1, length.out = n_subjects)
+  female <- rep(c(0L, 0L, 1L, 1L), length.out = n_subjects)
   baseline_ids <- paste0(subjects, "_FU0")
   followup_ids <- paste0(subjects, "_FU1")
 
@@ -115,7 +116,7 @@
       SUBJECT_ID = subjects,
       FU = 0L,
       TREATMENT_GROUP = treatment,
-      FEMALE = rep(0:1, length.out = n_subjects),
+      FEMALE = female,
       age = 35 + seq_len(n_subjects) / 3,
       bmi = 22 + (seq_len(n_subjects) %% 7) / 2,
       site = factor(rep(c("A", "B", "C"), length.out = n_subjects)),
@@ -126,7 +127,7 @@
       SUBJECT_ID = subjects,
       FU = 1L,
       TREATMENT_GROUP = treatment,
-      FEMALE = rep(0:1, length.out = n_subjects),
+      FEMALE = female,
       age = 35 + seq_len(n_subjects) / 3,
       bmi = 22 + (seq_len(n_subjects) %% 7) / 2,
       site = factor(rep(c("A", "B", "C"), length.out = n_subjects)),

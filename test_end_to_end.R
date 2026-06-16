@@ -45,9 +45,9 @@ enet_train <- read.csv(fu1$artifacts$enet_train, check.names = FALSE)
 enet_test <- read.csv(fu1$artifacts$enet_test, check.names = FALSE)
 xgb_train <- read.csv(fu1$artifacts$xgb_train, check.names = FALSE)
 xgb_test <- read.csv(fu1$artifacts$xgb_test, check.names = FALSE)
-cohort <- read.csv(fu1$artifacts$cohort, stringsAsFactors = FALSE)
-change_summary <- read.csv(fu1$artifacts$change_summary, stringsAsFactors = FALSE)
-preprocessing <- read.csv(fu1$artifacts$preprocessing, stringsAsFactors = FALSE)
+cohort <- read.csv(manifest$reports$cohort, stringsAsFactors = FALSE)
+change_summary <- read.csv(manifest$reports$change_summary, stringsAsFactors = FALSE)
+preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
 
 .expect_true(
   length(intersect(
@@ -80,6 +80,10 @@ preprocessing <- read.csv(fu1$artifacts$preprocessing, stringsAsFactors = FALSE)
   "model-ready matrices preserve feature boundaries"
 )
 .expect_true(
+  all(file.exists(unlist(manifest$reports, use.names = FALSE))),
+  "consolidated report artifacts are written"
+)
+.expect_true(
   identical(
     names(cohort),
     c(
@@ -110,10 +114,11 @@ preprocessing <- read.csv(fu1$artifacts$preprocessing, stringsAsFactors = FALSE)
   identical(
     names(preprocessing),
     c(
-      "FEATURE_NAME", "FEATURE_TYPE", "STATUS", "MEDIAN", "CENTER", "SCALE",
-      "IN_ENET", "IN_XGB"
+      "FU", "FEATURE_NAME", "FEATURE_TYPE", "STATUS", "MEDIAN", "CENTER",
+      "SCALE", "IN_ENET", "IN_XGB"
     )
   ) &&
+    all(preprocessing$FU == 1L) &&
     identical(preprocessing$FEATURE_NAME[preprocessing$IN_ENET], names(enet_train)) &&
     identical(preprocessing$FEATURE_NAME[preprocessing$IN_XGB], names(xgb_train)) &&
     all(

@@ -138,7 +138,8 @@
 
 .make_preprocessing_table <- function(feature_type, prefix, original_names,
                                       nonmissing_keep, medians, variance_keep,
-                                      center, scale, xgb_feature_names) {
+                                      center, scale, xgb_feature_names,
+                                      fu_level) {
   status <- rep("all_missing_training", length(original_names))
   names(status) <- original_names
 
@@ -157,6 +158,7 @@
 
   feature_names <- paste0(prefix, original_names)
   data.frame(
+    FU = fu_level,
     FEATURE_NAME = feature_names,
     FEATURE_TYPE = feature_type,
     STATUS = unname(status),
@@ -312,7 +314,8 @@
       variance_keep = dropped$keep,
       center = scaled$center,
       scale = scaled$scale,
-      xgb_feature_names = xgb_feature_names
+      xgb_feature_names = xgb_feature_names,
+      fu_level = unique(as.integer(as.character(train_pheno$FU)))
     )
   )
 }
@@ -373,7 +376,8 @@
     variance_keep = dropped$keep,
     center = scaled$center,
     scale = scaled$scale,
-    xgb_feature_names = retained_omics
+    xgb_feature_names = retained_omics,
+    fu_level = fu_level
   )
   colnames(scaled$train) <- paste0("omics::", colnames(scaled$train))
   colnames(scaled$test) <- colnames(scaled$train)

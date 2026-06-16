@@ -224,11 +224,11 @@ train_control_feature <- prepared$change_summary[
 artifact_dir <- tempfile("track22_prepared_")
 .write_prepared_dataset(prepared, artifact_dir)
 .expect_true(
-  all(file.exists(file.path(
+  all(!file.exists(file.path(
     artifact_dir,
     c("cohort.csv", "change_summary.csv", "preprocessing.csv")
   ))),
-  "ML reporting artifacts are written with prepared datasets"
+  "prepared dataset writer leaves consolidated reports to the run writer"
 )
 
 missing_visit_pheno <- fixture$pheno[

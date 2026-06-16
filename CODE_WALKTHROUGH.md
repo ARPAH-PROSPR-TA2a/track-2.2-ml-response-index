@@ -543,6 +543,10 @@ The pipeline writes the exact model inputs before fitting either model.
 ```text
 output_dir/
   manifest.json
+  reports/
+    cohort.csv
+    change_summary.csv
+    preprocessing.csv
   FU1/
     enet_train.csv.gz
     enet_test.csv.gz
@@ -550,9 +554,6 @@ output_dir/
     xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
-    cohort.csv
-    change_summary.csv
-    preprocessing.csv
     enet/
       metrics.csv
       predictions.csv
@@ -565,7 +566,8 @@ output_dir/
       model.json
 ```
 
-The structure repeats for every modelable nonzero follow-up.
+The `FU*` structure repeats for every modelable nonzero follow-up. The
+top-level `reports/` files stack rows across all modelable follow-ups.
 
 ### `subjects.csv`
 
@@ -589,20 +591,25 @@ This file preserves every repeated XGB fold assignment:
 | `REPEAT` | Repeat number |
 | `FOLD_ID` | Fold within the repeat |
 
-### `cohort.csv`
+### `reports/cohort.csv`
 
-For the modeled follow-up, this file records subject, treatment-arm, and sex
+For each modeled follow-up, this file records subject, treatment-arm, and sex
 counts for:
 
 - `eligible`: subjects with baseline and the follow-up;
 - `train`: subjects assigned to model training;
 - `test`: subjects assigned to held-out evaluation.
 
-### `change_summary.csv`
+### `reports/change_summary.csv`
 
 This file summarizes the raw, pre-imputation change matrix by `eligible`,
 `train`, and `test` set and by treatment arm. Each analyte row records subject
 count, nonmissing count, mean, median, SD, minimum, and maximum.
+
+### `reports/preprocessing.csv`
+
+This is the stacked preprocessing audit described above. The `FU` column
+identifies the follow-up that produced each feature row.
 
 ### Manifest
 

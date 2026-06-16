@@ -1,0 +1,4 @@
+"FU","SET","N_SUBJECTS","N_CONTROL","N_TREATMENT","N_MALE","N_FEMALE"
+1,"eligible",36,18,18,18,18
+1,"train",30,15,15,17,13
+1,"test",6,3,3,1,5

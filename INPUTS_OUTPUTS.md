@@ -48,6 +48,10 @@ DNAm is restricted to the reliable probe list in
 ```text
 output_dir/
   manifest.json
+  reports/
+    cohort.csv
+    change_summary.csv
+    preprocessing.csv
   FU1/
     enet_train.csv.gz
     enet_test.csv.gz
@@ -55,9 +59,6 @@ output_dir/
     xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
-    cohort.csv
-    change_summary.csv
-    preprocessing.csv
     enet/
       metrics.csv
       predictions.csv
@@ -70,8 +71,9 @@ output_dir/
       model.json
 ```
 
-One directory is produced per modelable follow-up. There are no modeling
-strata.
+One directory is produced per modelable follow-up. The top-level `reports/`
+directory contains stacked rows across all modelable follow-ups. There are no
+modeling strata.
 
 ### Model Matrices
 
@@ -103,9 +105,10 @@ Contains the repeated XGB cross-validation assignments:
 | `REPEAT` | XGB CV repeat number |
 | `FOLD_ID` | Treatment-stratified fold within that repeat |
 
-### `cohort.csv`
+### `reports/cohort.csv`
 
-Contains one row each for the FU-specific eligible, training, and test cohorts:
+Contains one row each for the eligible, training, and test cohorts for every
+modelable follow-up:
 
 | Column | Meaning |
 |:---|:---|
@@ -120,7 +123,7 @@ Contains one row each for the FU-specific eligible, training, and test cohorts:
 Eligibility requires both baseline and the modeled follow-up after input-level
 covariate filtering.
 
-### `change_summary.csv`
+### `reports/change_summary.csv`
 
 Summarizes raw, pre-imputation omics changes by set and treatment arm:
 
@@ -138,12 +141,13 @@ omics(FU k) - omics(FU 0)
 | `N_NONMISSING` | Observed change values |
 | `MEAN`, `MEDIAN`, `SD`, `MIN`, `MAX` | Raw change-score statistics |
 
-### `preprocessing.csv`
+### `reports/preprocessing.csv`
 
 Contains one row per candidate omics or encoded covariate feature:
 
 | Column | Meaning |
 |:---|:---|
+| `FU` | Follow-up modeled |
 | `FEATURE_NAME` | Prefixed model-matrix column name |
 | `FEATURE_TYPE` | `omics` or `covariate` |
 | `STATUS` | `retained`, `all_missing_training`, or `zero_variance_training` |
