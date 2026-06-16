@@ -9,38 +9,50 @@ fits ENET and/or XGB, writes all artifacts to disk, and returns a manifest.
 
 ## Table of Contents
 
-1. [Overview and Public API](#overview-and-public-api)
-2. [Shared Input Preparation](#shared-input-preparation)
-3. [Modeling Pipeline](#modeling-pipeline)
-4. [Subject Splitting and CV Folds](#subject-splitting-and-cv-folds)
-5. [Follow-Up Feature Construction](#follow-up-feature-construction)
-6. [Preprocessing](#preprocessing)
-7. [Model-Specific Feature Sets](#model-specific-feature-sets)
-8. [ENET Worker](#enet-worker)
-9. [XGB Worker](#xgb-worker)
-10. [Outputs, Reports, and Manifest](#outputs-reports-and-manifest)
+1. [Overview](#overview)
+2. [Public Function and Arguments](#public-function-and-arguments)
+3. [Step 1: Validate and Prepare Inputs](#step-1-validate-and-prepare-inputs)
+4. [Step 2: Select Follow-Ups and Split Subjects](#step-2-select-follow-ups-and-split-subjects)
+5. [Step 3: Construct Change Features](#step-3-construct-change-features)
+6. [Step 4: Preprocess Features](#step-4-preprocess-features)
+7. [Step 5: Build Model-Specific Matrices](#step-5-build-model-specific-matrices)
+8. [Step 6: Fit ENET](#step-6-fit-enet)
+9. [Step 7: Fit XGB](#step-7-fit-xgb)
+10. [Step 8: Write Outputs, Reports, and Manifest](#step-8-write-outputs-reports-and-manifest)
 
 ---
 
-## Overview and Public API
+## Overview
 
-The public modeling function begins with shared input preparation:
+`FAST_treatment_ML()` is the single public entry point for the Track 2.2 ML
+pipeline. It takes phenotype and omics data, validates and aligns them, creates
+one modeling dataset per nonzero follow-up, converts each dataset into
+baseline-to-follow-up change features, preprocesses features using training-only
+parameters, fits ENET and/or XGB, writes model artifacts plus reports, and
+returns a manifest.
 
 ```text
-pheno + omics
-      │
-      ▼
-.prepare_inputs()
-      │
-      └── FAST_treatment_ML()
-            └── split, construct features, preprocess, fit, write artifacts
+FAST_treatment_ML()
+├── validate arguments
+├── validate pheno/omics and apply DNAm probe filtering
+├── for each nonzero FU:
+│   ├── require baseline + FU
+│   ├── stratified train/test split
+│   ├── compute FU - baseline omics changes
+│   ├── preprocess using train-only parameters
+│   ├── build ENET and XGB matrices
+│   ├── write model-ready inputs
+│   ├── fit requested models
+│   └── collect report rows
+├── write reports/
+├── write manifest.json
+└── return manifest
 ```
 
-The input preparation path is documented once in
-[Shared Input Preparation](#shared-input-preparation). The complete external
-input and output contract is in `INPUTS_OUTPUTS.md`.
+Each section below follows that execution order. The complete external input
+and output contract is in `INPUTS_OUTPUTS.md`.
 
-### `FAST_treatment_ML()`
+## Public Function and Arguments
 
 File: `main.R`
 
@@ -63,13 +75,7 @@ FAST_treatment_ML <- function(
 )
 ```
 
-This is the modeling entry point. After shared input preparation, it calls
-`.run_ml_disk()` to process each follow-up, fit the requested models, write the
-artifacts, and return the run manifest.
-
-## Shared Input Preparation
-
-`FAST_treatment_ML()` accepts four data-definition arguments:
+`FAST_treatment_ML()` accepts these arguments:
 
 | Argument | Default | Role |
 |:---|:---|:---|
@@ -77,9 +83,35 @@ artifacts, and return the run manifest.
 | `omics` | Required | Analyte-by-sample numeric measurements. |
 | `omics_type` | `"Proteomics"` | Selects `"Proteomics"`, `"Metabolomics"`, or `"DNAm"` handling. It does not transform input values. |
 | `additional_covariates` | `NULL` | Optional phenotype columns used as ENET model covariates. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during validation. |
+| `models` | `c("enet", "xgb")` | Selects one or both model workers. |
+| `output_dir` | `NULL` | Selects the artifact directory; `NULL` creates a timestamped directory under `runs/`. |
+| `test_frac` | `0.2` | Sets the treatment-stratified held-out fraction. |
+| `enet_cv_folds` | `5L` | Requests the ENET fold count. |
+| `xgb_cv_folds` | `5L` | Requests the XGB fold count per repeat. |
+| `xgb_cv_repeats` | `3L` | Sets the number of independent XGB fold assignments. |
+| `xgb_n_trials` | `50L` | Sets the required Optuna search size. XGB requires at least `10`; values below `30` produce a warning. |
+| `n_cores` | `NULL` | Sets XGBoost threads; `NULL` uses one fewer than the detected core count. |
+| `python_bin` | `NULL` | Selects the XGB Python executable; `NULL` uses `python3`. |
+| `seed` | `1L` | Controls splitting, folds, model fitting, and tuning. |
 
-The complete user-facing contract is in `INPUTS_OUTPUTS.md`. The details below
-focus on how the code prepares those inputs.
+Argument validation happens before the pipeline touches data. `.validate_ml_args()`
+checks model names, split fraction, fold counts, XGB repeat count, seed,
+runtime settings, and XGB trial count.
+
+## Step 1: Validate and Prepare Inputs
+
+Input preparation is handled by `.prepare_inputs()`.
+
+```text
+.prepare_inputs()
+├── .validate_omics_type()
+├── .validate_pheno()
+├── .validate_omics()
+└── [DNAm only]
+    ├── load full and reliable probe lists
+    ├── .validate_dnam_probe_coverage()
+    └── .subset_omics_list(..., reliable_probes)
+```
 
 ### Phenotype Data
 
@@ -107,19 +139,6 @@ or logical.
 
 Extra samples are allowed on either side. The validator retains the
 intersection of phenotype sample IDs and omics column names.
-
-Input preparation is handled by `.prepare_inputs()`.
-
-```text
-.prepare_inputs()
-├── .validate_omics_type()
-├── .validate_pheno()
-├── .validate_omics()
-└── [DNAm only]
-    ├── load full and reliable probe lists
-    ├── .validate_dnam_probe_coverage()
-    └── .subset_omics_list(..., reliable_probes)
-```
 
 ### Phenotype Validation
 
@@ -167,57 +186,14 @@ the ML run to the reliable Sugden/TruD probe list.
 
 ---
 
-## Modeling Pipeline
+## Step 2: Select Follow-Ups and Split Subjects
 
-The modeling-only controls are:
-
-| Argument | Default | Role |
-|:---|:---|:---|
-| `models` | `c("enet", "xgb")` | Selects one or both model workers. |
-| `output_dir` | `NULL` | Selects the artifact directory; `NULL` creates a timestamped directory under `runs/`. |
-| `test_frac` | `0.2` | Sets the treatment-stratified held-out fraction. |
-| `enet_cv_folds` | `5L` | Requests the ENET fold count. |
-| `xgb_cv_folds` | `5L` | Requests the XGB fold count per repeat. |
-| `xgb_cv_repeats` | `3L` | Sets the number of independent XGB fold assignments. |
-| `xgb_n_trials` | `50L` | Sets the required Optuna search size. XGB requires at least `10`; values below `30` produce a warning. |
-| `n_cores` | `NULL` | Sets XGBoost threads; `NULL` uses one fewer than the detected core count. |
-| `python_bin` | `NULL` | Selects the XGB Python executable; `NULL` uses `python3`. |
-| `seed` | `1L` | Controls splitting, folds, model fitting, and tuning. |
-
-`FAST_treatment_ML()` validates these controls, resolves their defaults, runs
-shared preparation, and enters `.run_ml_disk()`.
-
-```text
-FAST_treatment_ML()
-│
-├── validate arguments and resolve defaults
-├── .prepare_inputs()
-│
-└── .run_ml_disk()
-    ├── find every nonzero FU level
-    │
-    └── for each FU k
-        ├── retain subjects with baseline and FU k
-        ├── create an FU-specific stratified train/test split
-        ├── .prepare_fu_change_dataset()
-        ├── collect cohort, change-summary, and preprocessing report rows
-        ├── write exact model-ready matrices and metadata
-        ├── [enet requested] .run_enet_worker()
-        ├── [xgb requested] .run_xgb_worker()
-        └── add artifact paths to the FU manifest
-    │
-    ├── write top-level reports/
-    └── write manifest.json
-```
-
+After validation, `FAST_treatment_ML()` enters `.run_ml_disk()`, which finds
+every nonzero `FU` level and processes each modelable follow-up independently.
 Each follow-up receives its own train/test split. The split is created only from
 subjects with both baseline and that specific follow-up, so treatment balance
 and test-set credibility are assessed against the cohort actually available for
 that model.
-
----
-
-## Subject Splitting and CV Folds
 
 ### Train/Test Split
 
@@ -259,7 +235,7 @@ The train/test split, fold assignment, and model fitting for a follow-up use
 
 ---
 
-## Follow-Up Feature Construction
+## Step 3: Construct Change Features
 
 `.prepare_fu_change_dataset()` builds one dataset for each nonzero follow-up.
 
@@ -293,7 +269,7 @@ values enter the models.
 
 ---
 
-## Preprocessing
+## Step 4: Preprocess Features
 
 Omics and requested covariates use the same four-stage preprocessing sequence:
 
@@ -348,7 +324,7 @@ transformation values left blank. XGB uses retained omics features plus retained
 
 ---
 
-## Model-Specific Feature Sets
+## Step 5: Build Model-Specific Matrices
 
 Feature names encode provenance:
 
@@ -385,7 +361,7 @@ feature set used by each model.
 
 ---
 
-## ENET Worker
+## Step 6: Fit ENET
 
 File: `ml_helpers.R`
 
@@ -438,7 +414,7 @@ without serializing the R model object.
 
 ---
 
-## XGB Worker
+## Step 7: Fit XGB
 
 Files: `ml_helpers.R`, `scripts/run_xgb.py`
 
@@ -511,7 +487,7 @@ the Python traceback remains visible in the console.
 
 ---
 
-## Outputs, Reports, and Manifest
+## Step 8: Write Outputs, Reports, and Manifest
 
 The pipeline writes exact model inputs before fitting either model. It also
 accumulates per-follow-up report rows during preparation and writes one
