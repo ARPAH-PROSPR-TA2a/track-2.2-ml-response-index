@@ -110,7 +110,7 @@ Input preparation is handled by `.prepare_inputs()`.
 └── [DNAm only]
     ├── load full and reliable probe lists
     ├── .validate_dnam_probe_coverage()
-    └── .subset_omics_list(..., reliable_probes)
+    └── .subset_omics(..., reliable_probes)
 ```
 
 ### Phenotype Data
@@ -153,10 +153,7 @@ intersection of phenotype sample IDs and omics column names.
 - For duplicate `SUBJECT_ID`/`FU` pairs, keeps the first row with a warning.
 - Drops rows with missing requested covariates.
 - Retains only subjects with a baseline and at least one follow-up.
-- Returns the validated all-subject phenotype table used by this ML pipeline.
-
-The returned `requires_mixed_effects` flag is inherited from shared validation
-code but is not used by this ML pipeline.
+- Returns the validated phenotype table used by this ML pipeline.
 
 ### Omics Validation
 
@@ -167,7 +164,7 @@ code but is not used by this ML pipeline.
 - Requires every measurement column to be numeric.
 - Intersects omics columns with validated phenotype sample IDs.
 - Warns when analytes contain missing values or near-zero variance.
-- Returns the validated all-subject omics table used by this ML pipeline.
+- Returns the validated omics table used by this ML pipeline.
 
 Missing values and near-zero variance are reported here but handled later using
 training-only preprocessing for each follow-up.

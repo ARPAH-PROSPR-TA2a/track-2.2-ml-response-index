@@ -50,12 +50,45 @@ run_validation_tests <- function() {
   )
 
   validated_pheno <- suppressWarnings(.validate_pheno(fixture$pheno))
+  .expect_true(
+    is.data.frame(validated_pheno) &&
+      !any(c("all", "male", "female", "requires_mixed_effects") %in%
+             names(validated_pheno)),
+    "phenotype validation returns the ML phenotype table"
+  )
+
+  single_sex_pheno <- fixture$pheno
+  single_sex_pheno$FU <- factor(single_sex_pheno$FU)
+  single_sex_pheno$TREATMENT_GROUP <- factor(single_sex_pheno$TREATMENT_GROUP, levels = 0:1)
+  single_sex_pheno$FEMALE <- factor(1L, levels = 0:1)
+  single_sex_warnings <- character(0)
+  single_sex_validated <- withCallingHandlers(
+    .validate_pheno(single_sex_pheno),
+    warning = function(w) {
+      single_sex_warnings <<- c(single_sex_warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  .expect_true(
+    is.data.frame(single_sex_validated) &&
+      !any(grepl("Male and female subsets", single_sex_warnings, fixed = TRUE)),
+    "single-sex phenotype input is accepted without legacy subset warnings"
+  )
+
   no_overlap <- fixture$omics
   names(no_overlap)[-1] <- paste0("OTHER_", seq_len(ncol(no_overlap) - 1L))
   .expect_error(
     suppressWarnings(.validate_omics(no_overlap, validated_pheno)),
     "No overlap between omics column names and pheno SAMPLE_IDs",
     "omics without shared samples are rejected"
+  )
+
+  validated_omics <- suppressWarnings(.validate_omics(fixture$omics, validated_pheno))
+  .expect_true(
+    is.data.frame(validated_omics) &&
+      identical(names(validated_omics)[1], "ANALYTE_NAME") &&
+      !any(c("all", "male", "female") %in% names(validated_omics)),
+    "omics validation returns the ML omics table"
   )
 
   .expect_error(

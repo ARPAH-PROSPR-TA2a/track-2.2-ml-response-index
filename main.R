@@ -56,18 +56,18 @@ source("ml_helpers.R")
 .prepare_inputs <- function(pheno, omics, omics_type, additional_covariates = NULL) {
   .validate_omics_type(omics_type)
 
-  pheno_list <- .validate_pheno(pheno, additional_covariates)
-  omics_list <- .validate_omics(omics, pheno_list)
+  pheno_df <- .validate_pheno(pheno, additional_covariates)
+  omics_df <- .validate_omics(omics, pheno_df)
 
   if (omics_type == "DNAm") {
     full_probes <- readRDS("Data/FAST_epicv1_epicv2_probe_list.rds")
     reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
-    .validate_dnam_probe_coverage(full_probes, reliable_probes, omics_list$all$ANALYTE_NAME)
-    omics_list <- .subset_omics_list(omics_list, reliable_probes)
-    message("DNAm: restricted analysis to ", nrow(omics_list$all), " reliable probes.")
+    .validate_dnam_probe_coverage(full_probes, reliable_probes, omics_df$ANALYTE_NAME)
+    omics_df <- .subset_omics(omics_df, reliable_probes)
+    message("DNAm: restricted analysis to ", nrow(omics_df), " reliable probes.")
   }
 
-  list(pheno_list = pheno_list, omics_list = omics_list)
+  list(pheno = pheno_df, omics = omics_df)
 }
 
 
@@ -105,8 +105,8 @@ FAST_treatment_ML <- function(pheno,
   inputs <- .prepare_inputs(pheno, omics, omics_type, additional_covariates)
 
   manifest <- .run_ml_disk(
-    pheno_df = inputs$pheno_list$all,
-    omics_df = inputs$omics_list$all,
+    pheno_df = inputs$pheno,
+    omics_df = inputs$omics,
     additional_covariates = additional_covariates,
     model_covariates = model_covariates,
     models = models,

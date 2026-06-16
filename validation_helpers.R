@@ -161,45 +161,17 @@
     stop("No subjects remain after requiring both a baseline and a follow-up sample with complete covariates.")
   }
 
-  # Step 6: Gender composition detection
-  n_male <- sum(pheno$FEMALE == 0, na.rm = TRUE)
-  n_female <- sum(pheno$FEMALE == 1, na.rm = TRUE)
-  
-  # Step 7: Subset creation
-  # Set both to NULL if either gender is missing
-  if (n_male == 0 || n_female == 0) {
-    warning("Dataset contains only one gender. Male and female subsets will be NULL.")
-    male_pheno <- NULL
-    female_pheno <- NULL
-  } else {
-    male_pheno <- pheno[pheno$FEMALE == 0, ]
-    female_pheno <- pheno[pheno$FEMALE == 1, ]
-  }
-  
-  # Step 8: Mixed effects flag
-  requires_mixed_effects <- max(as.numeric(as.character(pheno$FU)), na.rm = TRUE) >= 2
-  
-  # Step 9: Column cleanup
+  # Step 6: Column cleanup
   cols_to_keep <- c(required_cols, additional_covariates)
   cols_to_keep <- intersect(cols_to_keep, names(pheno))
   
   pheno <- pheno[, cols_to_keep, drop = FALSE]
-  if (!is.null(male_pheno)) {
-    male_pheno <- male_pheno[, cols_to_keep, drop = FALSE]
-    female_pheno <- female_pheno[, cols_to_keep, drop = FALSE]
-  }
   
-  # Return structure
-  list(
-    all = pheno,
-    male = male_pheno,
-    female = female_pheno,
-    requires_mixed_effects = requires_mixed_effects
-  )
+  pheno
 }
 
 
-.validate_omics <- function(omics, pheno_list) {
+.validate_omics <- function(omics, pheno_df) {
   
   # Step 1: Input validation and conversion
   if (is.matrix(omics)) {
@@ -223,8 +195,8 @@
     stop("All columns in omics (except ANALYTE_NAME) must be numeric")
   }
   
-   # Step 4: Filter to shared SAMPLE_IDs with pheno_list$all
-   pheno_sample_ids <- pheno_list$all$SAMPLE_ID
+   # Step 4: Filter to shared SAMPLE_IDs with pheno_df
+   pheno_sample_ids <- pheno_df$SAMPLE_ID
    omics_sample_ids <- names(omics_numeric)
     
    shared_samples <- intersect(omics_sample_ids, pheno_sample_ids)
@@ -265,31 +237,10 @@
     warning(n_with_nzv, " analytes have near-zero variance")
   }
   
-  # Add ANALYTE_NAME back to the omics data.frames
+  # Add ANALYTE_NAME back to the omics data.frame
   omics_all <- cbind(ANALYTE_NAME = analyte_names, omics_numeric)
-   
-  # Male subset
-  omics_male <- NULL
-  if (!is.null(pheno_list$male)) {
-    male_sample_ids <- pheno_list$male$SAMPLE_ID
-    male_cols <- intersect(colnames(omics_all), male_sample_ids)
-    omics_male <- omics_all[, c("ANALYTE_NAME", male_cols), drop = FALSE]
-  }
-  
-  # Female subset
-  omics_female <- NULL
-  if (!is.null(pheno_list$female)) {
-    female_sample_ids <- pheno_list$female$SAMPLE_ID
-    female_cols <- intersect(colnames(omics_all), female_sample_ids)
-    omics_female <- omics_all[, c("ANALYTE_NAME", female_cols), drop = FALSE]
-  }
-  
-  # Step 7: Return structure
-  list(
-    all = omics_all,
-    male = omics_male,
-    female = omics_female
-  )
+
+  omics_all
 }
 
 
@@ -318,22 +269,11 @@
 
 
 # Helper function to subset omics data to a specific set of analytes
-.subset_omics_list <- function(omics_list, analyte_subset) {
+.subset_omics <- function(omics_df, analyte_subset) {
   if (is.null(analyte_subset)) {
-    return(omics_list)
+    return(omics_df)
   }
 
-  subsetted <- list()
-  for (dataset in c("all", "male", "female")) {
-    if (is.null(omics_list[[dataset]])) {
-      subsetted[[dataset]] <- NULL
-      next
-    }
-
-    omics_df <- omics_list[[dataset]]
-    matching_analytes <- omics_df$ANALYTE_NAME %in% analyte_subset
-    subsetted[[dataset]] <- omics_df[matching_analytes, ]
-  }
-
-  return(subsetted)
+  matching_analytes <- omics_df$ANALYTE_NAME %in% analyte_subset
+  omics_df[matching_analytes, , drop = FALSE]
 }
