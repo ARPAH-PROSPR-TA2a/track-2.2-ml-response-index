@@ -147,7 +147,7 @@ test_outputs/track22_integration/
 For a larger demo-scale smoke run with inspectable, analysis-like outputs:
 
 ```bash
-Rscript test_demo_run.R
+Rscript scripts/demo_run.R
 ```
 
 This writes to:

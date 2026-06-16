@@ -1,3 +1,10 @@
+args <- commandArgs(trailingOnly = FALSE)
+file_arg <- grep("^--file=", args, value = TRUE)
+if (length(file_arg) == 1L) {
+  script_dir <- dirname(normalizePath(sub("^--file=", "", file_arg)))
+  setwd(dirname(script_dir))
+}
+
 source("main.R")
 
 
