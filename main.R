@@ -1,5 +1,4 @@
 source("validation_helpers.R")
-source("reporting_helpers.R")
 source("feature_helpers.R")
 source("ml_helpers.R")
 
@@ -123,13 +122,4 @@ FAST_treatment_ML <- function(pheno,
   )
 
   manifest
-}
-
-
-FAST_treatment_ML_reports <- function(pheno,
-                                      omics,
-                                      omics_type = "Proteomics",
-                                      additional_covariates = NULL) {
-  inputs <- .prepare_inputs(pheno, omics, omics_type, additional_covariates)
-  .generate_reports(inputs$pheno_list, inputs$omics_list, additional_covariates)
 }

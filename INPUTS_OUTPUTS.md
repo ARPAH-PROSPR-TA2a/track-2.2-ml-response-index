@@ -219,15 +219,3 @@ iterations, median best iteration, and parameters for every Optuna trial. XGB
 requires at least 10 trials; fewer than 30 produce a limited-search warning.
 
 `xgb/model.json` is the fitted XGBoost model.
-
-## Reports
-
-`FAST_treatment_ML_reports()` returns:
-
-```r
-list(
-  pheno_summary = ...,
-  variable_summaries = ...,
-  randomization_reports = ...
-)
-```

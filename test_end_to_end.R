@@ -220,22 +220,3 @@ reconstructed_prob <- stats::plogis(linear_predictor)
   },
   "XGB selected parameters and repeated-CV metrics are recorded"
 )
-
-reports <- suppressWarnings(FAST_treatment_ML_reports(
-  pheno = fixture$pheno,
-  omics = fixture$omics,
-  omics_type = "Proteomics",
-  additional_covariates = c("age", "bmi", "site", "smoker")
-))
-.expect_true(
-  identical(
-    names(reports),
-    c("pheno_summary", "variable_summaries", "randomization_reports")
-  ),
-  "reporting returns the documented top-level structure"
-)
-.expect_true(
-  !is.null(reports$randomization_reports$omics_report) &&
-    !is.null(reports$randomization_reports$covariate_report),
-  "randomization reports are populated"
-)

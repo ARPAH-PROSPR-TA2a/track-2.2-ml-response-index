@@ -120,18 +120,12 @@ cat("\nModel run complete.\n")
 cat("Manifest: ", manifest$manifest_path, "\n", sep = "")
 print_metrics(output_dir)
 
-cat("\nRunning reports...\n")
-reports <- FAST_treatment_ML_reports(
-  pheno = demo$pheno,
-  omics = demo$omics,
-  omics_type = "Proteomics",
-  additional_covariates = c("age", "bmi", "site", "smoker")
-)
-
-cat("Report objects:\n")
-cat("  pheno_summary rows: ", nrow(reports$pheno_summary), "\n", sep = "")
-cat("  variable_summaries strata: ", paste(names(reports$variable_summaries), collapse = ", "), "\n", sep = "")
-cat("  randomization reports: ", paste(names(reports$randomization_reports), collapse = ", "), "\n", sep = "")
+cat("\nReport CSVs:\n")
+for (report_name in names(manifest$reports)) {
+  report_path <- manifest$reports[[report_name]]
+  report <- read.csv(report_path, stringsAsFactors = FALSE)
+  cat("  ", report_name, ": ", nrow(report), " rows at ", report_path, "\n", sep = "")
+}
 
 cat("\nDemo output is available for inspection at:\n")
 cat(output_dir, "\n")

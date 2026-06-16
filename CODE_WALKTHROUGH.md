@@ -4,12 +4,8 @@ This walkthrough documents the current Track 2.2 implementation. The pipeline
 predicts randomized treatment assignment from baseline-to-follow-up omics
 changes. Its modeling target is `TREATMENT_GROUP`.
 
-The current public functions are:
-
-- `FAST_treatment_ML()`: prepares model-ready datasets, fits ENET and/or XGB,
-  writes all artifacts to disk, and returns a manifest.
-- `FAST_treatment_ML_reports()`: runs the shared validation stack and returns
-  descriptive and randomization reports without fitting models.
+The public function is `FAST_treatment_ML()`: it prepares model-ready datasets,
+fits ENET and/or XGB, writes all artifacts to disk, and returns a manifest.
 
 ## Table of Contents
 
@@ -23,7 +19,6 @@ The current public functions are:
 8. [ENET Worker](#enet-worker)
 9. [XGB Worker](#xgb-worker)
 10. [Disk Artifacts and Manifest](#disk-artifacts-and-manifest)
-11. [Reporting Pipeline](#reporting-pipeline)
 
 ---
 
@@ -37,11 +32,8 @@ pheno + omics
       ▼
 .prepare_inputs()
       │
-      ├── FAST_treatment_ML()
-      │     └── split, construct features, preprocess, fit, write artifacts
-      │
-      └── FAST_treatment_ML_reports()
-            └── descriptive summaries and randomization reports
+      └── FAST_treatment_ML()
+            └── split, construct features, preprocess, fit, write artifacts
 ```
 
 The shared arguments and preparation path are documented once in
@@ -74,25 +66,6 @@ FAST_treatment_ML <- function(
 This is the modeling entry point. After shared input preparation, it calls
 `.run_ml_disk()` to process each follow-up, fit the requested models, write the
 artifacts, and return the run manifest.
-
-### `FAST_treatment_ML_reports()`
-
-File: `main.R`
-
-```r
-FAST_treatment_ML_reports <- function(
-  pheno,
-  omics,
-  omics_type = "Proteomics",
-  additional_covariates = NULL
-)
-```
-
-This is the reporting entry point. After the same shared input preparation, it
-calls `.generate_reports()`. It does not split subjects, create model matrices,
-or fit models.
-
----
 
 ## Shared Input Preparation
 
@@ -621,43 +594,3 @@ Follow-ups that cannot produce a valid prepared dataset are stored as `NULL` in
 the in-memory manifest.
 
 ---
-
-## Reporting Pipeline
-
-`FAST_treatment_ML_reports()` returns:
-
-```r
-list(
-  pheno_summary = ...,
-  variable_summaries = list(all = ..., male = ..., female = ...),
-  randomization_reports = list(
-    omics_report = ...,
-    covariate_report = ...
-  )
-)
-```
-
-### Phenotype Summary
-
-`.create_pheno_data_report()` reports subject, treatment-arm, and sample counts
-for each `FU`/`FEMALE` cell.
-
-### Variable Summaries
-
-For each available reporting stratum and each `FU`/treatment cell:
-
-- omics summaries include nonmissing count, mean, median, SD, minimum, and
-  maximum per analyte;
-- requested covariate summaries depend on whether the variable is numeric,
-  factor, or logical.
-
-### Randomization Reports
-
-Randomization reports use baseline data from the all-subject dataset:
-
-- Omics: Welch t-test per analyte, treatment-minus-control mean difference,
-  Cohen's d, SE, raw p-value, and global BH correction.
-- Covariates: Welch t-test for numeric variables; Fisher or chi-squared tests
-  for factor/logical variables depending on cell counts.
-
-Reporting strata do not imply modeling strata.

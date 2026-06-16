@@ -5,8 +5,7 @@ trial datasets. The target is `TREATMENT_GROUP`.
 
 The pipeline exposes:
 
-- `FAST_treatment_ML()` for model fitting.
-- `FAST_treatment_ML_reports()` for QC/data summaries and randomization reports.
+- `FAST_treatment_ML()` for model fitting and ML-specific reports.
 
 ## Quick Example
 
@@ -156,21 +155,6 @@ This writes to:
 ```text
 test_outputs/track22_demo/
 ```
-
-## Reports
-
-```r
-reports <- FAST_treatment_ML_reports(
-  pheno = pheno,
-  omics = omics,
-  omics_type = "Proteomics",
-  additional_covariates = c("agebl", "mbmi")
-)
-```
-
-Reports return `pheno_summary`, `variable_summaries`, and
-`randomization_reports`. Reporting may summarize by sex; modeling is not
-sex-stratified.
 
 ## Documentation
 
