@@ -18,13 +18,13 @@ fits ENET and/or XGB, writes all artifacts to disk, and returns a manifest.
 7. [Model-Specific Feature Sets](#model-specific-feature-sets)
 8. [ENET Worker](#enet-worker)
 9. [XGB Worker](#xgb-worker)
-10. [Disk Artifacts and Manifest](#disk-artifacts-and-manifest)
+10. [Outputs, Reports, and Manifest](#outputs-reports-and-manifest)
 
 ---
 
 ## Overview and Public API
 
-Both public functions begin with the same input preparation:
+The public modeling function begins with shared input preparation:
 
 ```text
 pheno + omics
@@ -36,7 +36,7 @@ pheno + omics
             └── split, construct features, preprocess, fit, write artifacts
 ```
 
-The shared arguments and preparation path are documented once in
+The input preparation path is documented once in
 [Shared Input Preparation](#shared-input-preparation). The complete external
 input and output contract is in `INPUTS_OUTPUTS.md`.
 
@@ -69,14 +69,14 @@ artifacts, and return the run manifest.
 
 ## Shared Input Preparation
 
-Both public functions accept the same four input arguments:
+`FAST_treatment_ML()` accepts four data-definition arguments:
 
 | Argument | Default | Role |
 |:---|:---|:---|
 | `pheno` | Required | Sample-level phenotype and treatment data. |
 | `omics` | Required | Analyte-by-sample numeric measurements. |
 | `omics_type` | `"Proteomics"` | Selects `"Proteomics"`, `"Metabolomics"`, or `"DNAm"` handling. It does not transform input values. |
-| `additional_covariates` | `NULL` | Optional phenotype columns used as model covariates or reporting variables. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during validation. |
+| `additional_covariates` | `NULL` | Optional phenotype columns used as ENET model covariates. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during validation. |
 
 The complete user-facing contract is in `INPUTS_OUTPUTS.md`. The details below
 focus on how the code prepares those inputs.
@@ -108,7 +108,7 @@ or logical.
 Extra samples are allowed on either side. The validator retains the
 intersection of phenotype sample IDs and omics column names.
 
-Both public functions call `.prepare_inputs()`.
+Input preparation is handled by `.prepare_inputs()`.
 
 ```text
 .prepare_inputs()
@@ -134,7 +134,7 @@ Both public functions call `.prepare_inputs()`.
 - For duplicate `SUBJECT_ID`/`FU` pairs, keeps the first row with a warning.
 - Drops rows with missing requested covariates.
 - Retains only subjects with a baseline and at least one follow-up.
-- Creates `all`, `male`, and `female` phenotype subsets for reporting.
+- Returns the validated all-subject phenotype table used by this ML pipeline.
 
 The returned `requires_mixed_effects` flag is inherited from shared validation
 code but is not used by this ML pipeline.
@@ -148,7 +148,7 @@ code but is not used by this ML pipeline.
 - Requires every measurement column to be numeric.
 - Intersects omics columns with validated phenotype sample IDs.
 - Warns when analytes contain missing values or near-zero variance.
-- Creates all-subject and sex-specific omics subsets.
+- Returns the validated all-subject omics table used by this ML pipeline.
 
 Missing values and near-zero variance are reported here but handled later using
 training-only preprocessing for each follow-up.
@@ -163,7 +163,7 @@ Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
 ```
 
 It validates that the input contains probes from both lists, then restricts
-modeling and reporting to the reliable Sugden/TruD probe list.
+the ML run to the reliable Sugden/TruD probe list.
 
 ---
 
@@ -200,11 +200,13 @@ FAST_treatment_ML()
         ├── retain subjects with baseline and FU k
         ├── create an FU-specific stratified train/test split
         ├── .prepare_fu_change_dataset()
+        ├── collect cohort, change-summary, and preprocessing report rows
         ├── write exact model-ready matrices and metadata
         ├── [enet requested] .run_enet_worker()
         ├── [xgb requested] .run_xgb_worker()
         └── add artifact paths to the FU manifest
     │
+    ├── write top-level reports/
     └── write manifest.json
 ```
 
@@ -509,9 +511,11 @@ the Python traceback remains visible in the console.
 
 ---
 
-## Disk Artifacts and Manifest
+## Outputs, Reports, and Manifest
 
-The pipeline writes the exact model inputs before fitting either model.
+The pipeline writes exact model inputs before fitting either model. It also
+accumulates per-follow-up report rows during preparation and writes one
+top-level `reports/` directory after all modelable follow-ups finish.
 
 ```text
 output_dir/
