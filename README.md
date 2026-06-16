@@ -144,18 +144,6 @@ The suite requires both ENET and XGB and leaves the integration artifacts at:
 test_outputs/track22_integration/
 ```
 
-For a larger demo-scale smoke run with inspectable, analysis-like outputs:
-
-```bash
-Rscript scripts/demo_run.R
-```
-
-This writes to:
-
-```text
-test_outputs/track22_demo/
-```
-
 ## Documentation
 
 - [INPUTS_OUTPUTS.md](INPUTS_OUTPUTS.md): input requirements and artifact schemas.
