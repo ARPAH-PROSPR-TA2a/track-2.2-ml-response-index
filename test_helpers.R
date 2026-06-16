@@ -102,30 +102,19 @@
 }
 
 
-.make_simulated_fixture <- function(n_subjects = 36L, n_features = 24L, seed = 2202L) {
+.make_simulated_fixture <- function(n_subjects = 36L, n_features = 24L,
+                                    followups = 1L, seed = 2202L) {
   set.seed(seed)
   subjects <- sprintf("SUBJ%03d", seq_len(n_subjects))
   treatment <- rep(0:1, length.out = n_subjects)
   female <- rep(c(0L, 0L, 1L, 1L), length.out = n_subjects)
   baseline_ids <- paste0(subjects, "_FU0")
-  followup_ids <- paste0(subjects, "_FU1")
 
-  pheno <- rbind(
+  make_pheno <- function(fu, sample_ids) {
     data.frame(
-      SAMPLE_ID = baseline_ids,
+      SAMPLE_ID = sample_ids,
       SUBJECT_ID = subjects,
-      FU = 0L,
-      TREATMENT_GROUP = treatment,
-      FEMALE = female,
-      age = 35 + seq_len(n_subjects) / 3,
-      bmi = 22 + (seq_len(n_subjects) %% 7) / 2,
-      site = factor(rep(c("A", "B", "C"), length.out = n_subjects)),
-      smoker = rep(c(FALSE, TRUE, FALSE), length.out = n_subjects)
-    ),
-    data.frame(
-      SAMPLE_ID = followup_ids,
-      SUBJECT_ID = subjects,
-      FU = 1L,
+      FU = fu,
       TREATMENT_GROUP = treatment,
       FEMALE = female,
       age = 35 + seq_len(n_subjects) / 3,
@@ -133,18 +122,28 @@
       site = factor(rep(c("A", "B", "C"), length.out = n_subjects)),
       smoker = rep(c(FALSE, TRUE, FALSE), length.out = n_subjects)
     )
-  )
+  }
+  followup_ids <- lapply(followups, function(fu) paste0(subjects, "_FU", fu))
+  names(followup_ids) <- paste0("FU", followups)
+
+  pheno <- do.call(rbind, c(
+    list(make_pheno(0L, baseline_ids)),
+    Map(make_pheno, followups, followup_ids)
+  ))
 
   baseline <- matrix(rnorm(n_features * n_subjects), nrow = n_features)
-  change <- matrix(rnorm(n_features * n_subjects, sd = 0.7), nrow = n_features)
-  change[1:3, treatment == 1L] <- change[1:3, treatment == 1L] + 2.5
-  change[n_features, ] <- 0
-  followup <- baseline + change
   baseline[4, 2] <- NA_real_
-  followup[4, 2] <- NA_real_
+  followup_values <- lapply(seq_along(followups), function(i) {
+    change <- matrix(rnorm(n_features * n_subjects, sd = 0.7), nrow = n_features)
+    change[1:3, treatment == 1L] <- change[1:3, treatment == 1L] + 2.5 + 0.25 * i
+    change[n_features, ] <- 0
+    out <- baseline + change
+    out[4, 2] <- NA_real_
+    out
+  })
 
-  omics_values <- cbind(baseline, followup)
-  colnames(omics_values) <- c(baseline_ids, followup_ids)
+  omics_values <- do.call(cbind, c(list(baseline), followup_values))
+  colnames(omics_values) <- c(baseline_ids, unlist(followup_ids, use.names = FALSE))
   omics <- data.frame(
     ANALYTE_NAME = paste0("protein_", seq_len(n_features)),
     omics_values,

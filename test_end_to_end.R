@@ -4,7 +4,7 @@ source("test_helpers.R")
 cat("\nEnd-to-end pipeline\n")
 cat("===================\n")
 
-fixture <- .make_simulated_fixture()
+fixture <- .make_simulated_fixture(followups = 1:2)
 output_dir <- file.path(getwd(), "test_outputs", "track22_integration")
 if (dir.exists(output_dir)) {
   unlink(output_dir, recursive = TRUE)
@@ -28,7 +28,8 @@ manifest <- suppressWarnings(FAST_treatment_ML(
 ))
 
 fu1 <- manifest$followups$FU1
-.expect_true(!is.null(fu1), "all-subject FU1 run completes")
+fu2 <- manifest$followups$FU2
+.expect_true(!is.null(fu1) && !is.null(fu2), "all-subject FU1 and FU2 runs complete")
 .expect_true(
   identical(normalizePath(output_dir), manifest$output_dir),
   "test outputs persist in the working directory"
@@ -84,6 +85,10 @@ preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FAL
   "consolidated report artifacts are written"
 )
 .expect_true(
+  all(c("FU1", "FU2") %in% names(manifest$followups)),
+  "manifest records both modeled follow-ups"
+)
+.expect_true(
   identical(
     names(cohort),
     c(
@@ -91,11 +96,13 @@ preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FAL
       "N_MALE", "N_FEMALE"
     )
   ) &&
-    identical(cohort$SET, c("eligible", "train", "test")) &&
-    cohort$N_SUBJECTS[cohort$SET == "eligible"] == nrow(subjects) &&
-    cohort$N_SUBJECTS[cohort$SET == "train"] == sum(subjects$SET == "train") &&
-    cohort$N_SUBJECTS[cohort$SET == "test"] == sum(subjects$SET == "test"),
-  "cohort artifact describes eligible, train, and test subjects"
+    identical(sort(unique(cohort$FU)), 1:2) &&
+    all(table(cohort$FU) == 3L) &&
+    all(c("eligible", "train", "test") %in% cohort$SET) &&
+    cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "eligible"] == nrow(subjects) &&
+    cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "train"] == sum(subjects$SET == "train") &&
+    cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "test"] == sum(subjects$SET == "test"),
+  "cohort artifact stacks eligible, train, and test subjects across follow-ups"
 )
 .expect_true(
   identical(
@@ -105,10 +112,11 @@ preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FAL
       "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX"
     )
   ) &&
+    identical(sort(unique(change_summary$FU)), 1:2) &&
     all(c("eligible", "train", "test") %in% change_summary$SET) &&
     all(0:1 %in% change_summary$TREATMENT_GROUP) &&
     all(change_summary$ANALYTE_NAME %in% fixture$omics$ANALYTE_NAME),
-  "change summary artifact describes raw changes by set and treatment"
+  "change summary artifact stacks raw changes by set and treatment"
 )
 .expect_true(
   identical(
@@ -118,9 +126,15 @@ preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FAL
       "SCALE", "IN_ENET", "IN_XGB"
     )
   ) &&
-    all(preprocessing$FU == 1L) &&
-    identical(preprocessing$FEATURE_NAME[preprocessing$IN_ENET], names(enet_train)) &&
-    identical(preprocessing$FEATURE_NAME[preprocessing$IN_XGB], names(xgb_train)) &&
+    identical(sort(unique(preprocessing$FU)), 1:2) &&
+    identical(
+      preprocessing$FEATURE_NAME[preprocessing$FU == 1L & preprocessing$IN_ENET],
+      names(enet_train)
+    ) &&
+    identical(
+      preprocessing$FEATURE_NAME[preprocessing$FU == 1L & preprocessing$IN_XGB],
+      names(xgb_train)
+    ) &&
     all(
       is.finite(as.matrix(
         preprocessing[

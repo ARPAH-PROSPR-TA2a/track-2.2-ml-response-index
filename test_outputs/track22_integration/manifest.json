@@ -41,6 +41,31 @@
           "model": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU1/xgb/model.json"
         }
       }
+    },
+    "FU2": {
+      "data_dir": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2",
+      "artifacts": {
+        "enet_train": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/enet_train.csv.gz",
+        "enet_test": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/enet_test.csv.gz",
+        "xgb_train": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb_train.csv.gz",
+        "xgb_test": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb_test.csv.gz",
+        "subjects": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/subjects.csv",
+        "xgb_folds": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb_folds.csv"
+      },
+      "models": {
+        "enet": {
+          "metrics": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/enet/metrics.csv",
+          "predictions": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/enet/predictions.csv",
+          "weights": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/enet/weights.csv"
+        },
+        "xgb": {
+          "metrics": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb/metrics.csv",
+          "predictions": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb/predictions.csv",
+          "importance": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb/importance.csv",
+          "tuning": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb/tuning.csv",
+          "model": "/Users/willcambridge/Columbia/FAST/Track2.2/test_outputs/track22_integration/FU2/xgb/model.json"
+        }
+      }
     }
   }
 }
