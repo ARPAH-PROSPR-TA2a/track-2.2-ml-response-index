@@ -1,4 +1,4 @@
-# Treatment ML Pipeline
+# ML Response Index Pipeline
 
 Track 2.2 predicts assigned treatment from omics change signatures in randomized
 trial datasets. The target is `TREATMENT_GROUP`.
@@ -61,8 +61,8 @@ FAST_treatment_ML(
 )
 ```
 
-The Python environment must provide `numpy`, `pandas`, `scikit-learn`,
-`xgboost`, and `optuna`.
+The Python environment must have `numpy`, `pandas`, `scikit-learn`,
+`xgboost`, and `optuna` installed.
 
 ## Models
 
