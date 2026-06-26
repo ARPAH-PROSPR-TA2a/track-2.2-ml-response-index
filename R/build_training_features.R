@@ -238,6 +238,36 @@
 }
 
 
+.make_followup_change_data <- function(pheno_df, omics_df, fu_level) {
+  fu_num <- as.integer(as.character(pheno_df$FU))
+  pheno_baseline <- pheno_df[fu_num == 0L, ]
+  pheno_followup <- pheno_df[fu_num == fu_level, ]
+
+  complete_subjects <- intersect(pheno_baseline$SUBJECT_ID, pheno_followup$SUBJECT_ID)
+  subject_ids <- intersect(pheno_followup$SUBJECT_ID, complete_subjects)
+
+  if (length(subject_ids) == 0L) {
+    return(NULL)
+  }
+
+  pheno_baseline <- pheno_baseline[match(subject_ids, pheno_baseline$SUBJECT_ID), ]
+  pheno_followup <- pheno_followup[match(subject_ids, pheno_followup$SUBJECT_ID), ]
+
+  baseline_values <- as.matrix(omics_df[, pheno_baseline$SAMPLE_ID, drop = FALSE])
+  followup_values <- as.matrix(omics_df[, pheno_followup$SAMPLE_ID, drop = FALSE])
+  change_matrix <- t(followup_values - baseline_values)
+  colnames(change_matrix) <- omics_df$ANALYTE_NAME
+
+  list(
+    fu_level = fu_level,
+    subject_ids = subject_ids,
+    pheno_followup = pheno_followup,
+    y = .as_binary_numeric(pheno_followup$TREATMENT_GROUP),
+    change_matrix = change_matrix
+  )
+}
+
+
 .prepare_covariate_matrices <- function(train_pheno, additional_covariates = NULL) {
   if (is.null(additional_covariates) || length(additional_covariates) == 0L) {
     return(list(
@@ -297,23 +327,14 @@
                                        xgb_cv_folds = 10L,
                                        xgb_cv_repeats = 3L,
                                        seed = 1L) {
-  fu_num <- as.integer(as.character(pheno_df$FU))
-  pheno_baseline <- pheno_df[fu_num == 0L, ]
-  pheno_followup <- pheno_df[fu_num == fu_level, ]
-
-  complete_subjects <- intersect(pheno_baseline$SUBJECT_ID, pheno_followup$SUBJECT_ID)
-  train_subjects <- intersect(pheno_followup$SUBJECT_ID, complete_subjects)
-
-  if (length(train_subjects) == 0L) {
+  change_data <- .make_followup_change_data(pheno_df, omics_df, fu_level)
+  if (is.null(change_data)) {
     warning("FU", fu_level, ": no subjects after requiring baseline and follow-up.")
     return(NULL)
   }
 
-  ordered_subjects <- train_subjects
-  pheno_baseline <- pheno_baseline[match(ordered_subjects, pheno_baseline$SUBJECT_ID), ]
-  pheno_followup <- pheno_followup[match(ordered_subjects, pheno_followup$SUBJECT_ID), ]
-
-  y <- .as_binary_numeric(pheno_followup$TREATMENT_GROUP)
+  train_subjects <- change_data$subject_ids
+  y <- change_data$y
   train_idx <- seq_along(train_subjects)
 
   if (length(unique(y[train_idx])) < 2L) {
@@ -321,12 +342,7 @@
     return(NULL)
   }
 
-  baseline_values <- as.matrix(omics_df[, pheno_baseline$SAMPLE_ID, drop = FALSE])
-  followup_values <- as.matrix(omics_df[, pheno_followup$SAMPLE_ID, drop = FALSE])
-  change_matrix <- t(followup_values - baseline_values)
-  colnames(change_matrix) <- omics_df$ANALYTE_NAME
-
-  omics_train <- change_matrix[train_idx, , drop = FALSE]
+  omics_train <- change_data$change_matrix[train_idx, , drop = FALSE]
   nonmissing <- .drop_all_missing_train(omics_train)
   imputed <- .impute_train_median(nonmissing$train)
   dropped <- .drop_zero_variance_train(imputed$train)
@@ -346,7 +362,7 @@
   )
   colnames(scaled$train) <- paste0("omics::", colnames(scaled$train))
 
-  train_pheno <- pheno_followup[train_idx, , drop = FALSE]
+  train_pheno <- change_data$pheno_followup[train_idx, , drop = FALSE]
   model_covariates <- unique(c("FEMALE", model_covariates))
   covariates <- .prepare_covariate_matrices(train_pheno, model_covariates)
   if (!is.null(covariates$train)) {
@@ -407,9 +423,9 @@
     xgb_folds = do.call(rbind, xgb_fold_rows),
     enet_x_train = enet_train,
     xgb_x_train = xgb_train,
-    cohort = .make_cohort_report(pheno_followup),
+    cohort = .make_cohort_report(change_data$pheno_followup),
     change_summary = .make_change_summary(
-      change_matrix,
+      change_data$change_matrix,
       y,
       fu_level
     ),

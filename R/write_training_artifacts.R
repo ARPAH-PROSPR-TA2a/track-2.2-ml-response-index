@@ -158,6 +158,7 @@
 .run_ml_disk <- function(pheno_df, omics_df, additional_covariates = NULL,
                          model_covariates = "FEMALE",
                          models = c("enet", "xgb"), output_dir,
+                         omics_type = NULL,
                          enet_cv_folds = 10L,
                          xgb_cv_folds = 10L, xgb_cv_repeats = 3L, seed = 1L,
                          n_cores = 1L, python_bin = "python3",
@@ -166,6 +167,7 @@
   manifest <- list(
     output_dir = normalizePath(output_dir, mustWork = FALSE),
     target = "TREATMENT_GROUP",
+    omics_type = omics_type,
     feature_mode = "change",
     requested_models = models,
     enet_cv_folds = enet_cv_folds,

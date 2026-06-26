@@ -280,3 +280,21 @@
   matching_analytes <- omics_df$ANALYTE_NAME %in% analyte_subset
   omics_df[matching_analytes, , drop = FALSE]
 }
+
+
+.prepare_inputs <- function(pheno, omics, omics_type, additional_covariates = NULL) {
+  .validate_omics_type(omics_type)
+
+  pheno_df <- .validate_pheno(pheno, additional_covariates)
+  omics_df <- .validate_omics(omics, pheno_df)
+
+  if (omics_type == "DNAm") {
+    full_probes <- readRDS("Data/FAST_epicv1_epicv2_probe_list.rds")
+    reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
+    .validate_dnam_probe_coverage(full_probes, reliable_probes, omics_df$ANALYTE_NAME)
+    omics_df <- .subset_omics(omics_df, reliable_probes)
+    message("DNAm: restricted analysis to ", nrow(omics_df), " reliable probes.")
+  }
+
+  list(pheno = pheno_df, omics = omics_df)
+}

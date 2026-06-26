@@ -48,24 +48,6 @@ source(file.path("R", "write_training_artifacts.R"))
 }
 
 
-.prepare_inputs <- function(pheno, omics, omics_type, additional_covariates = NULL) {
-  .validate_omics_type(omics_type)
-
-  pheno_df <- .validate_pheno(pheno, additional_covariates)
-  omics_df <- .validate_omics(omics, pheno_df)
-
-  if (omics_type == "DNAm") {
-    full_probes <- readRDS("Data/FAST_epicv1_epicv2_probe_list.rds")
-    reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
-    .validate_dnam_probe_coverage(full_probes, reliable_probes, omics_df$ANALYTE_NAME)
-    omics_df <- .subset_omics(omics_df, reliable_probes)
-    message("DNAm: restricted analysis to ", nrow(omics_df), " reliable probes.")
-  }
-
-  list(pheno = pheno_df, omics = omics_df)
-}
-
-
 FAST_treatment_ML <- function(pheno,
                               omics,
                               omics_type = "Proteomics",
@@ -105,6 +87,7 @@ FAST_treatment_ML <- function(pheno,
     model_covariates = model_covariates,
     models = models,
     output_dir = output_dir,
+    omics_type = omics_type,
     enet_cv_folds = as.integer(enet_cv_folds),
     xgb_cv_folds = as.integer(xgb_cv_folds),
     xgb_cv_repeats = as.integer(xgb_cv_repeats),

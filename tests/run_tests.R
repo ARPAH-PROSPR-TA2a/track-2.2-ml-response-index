@@ -11,14 +11,35 @@ cat("====================\n")
 
 options(track22.tests.passed = 0L)
 source(file.path("training", "main.R"))
+source(file.path("inference", "main.R"))
 source(file.path("tests", "helpers.R"))
+source(file.path("tests", "test_inference_equivalence.R"))
 
-required_r <- c("glmnet", "jsonlite", "pROC")
+required_r <- c("glmnet", "jsonlite", "pROC", "xgboost")
 missing_r <- required_r[!vapply(required_r, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_r) > 0L) {
   stop("Missing required R packages: ", paste(missing_r, collapse = ", "), call. = FALSE)
 }
 cat("PASS R dependencies are ready\n")
+
+.test_python_bin <- function() {
+  repo_python <- file.path(getwd(), ".track22-python", "bin", "python")
+  if (file.exists(repo_python)) {
+    return(repo_python)
+  }
+
+  python3 <- Sys.which("python3")
+  if (nzchar(python3)) {
+    return(unname(python3))
+  }
+
+  python <- Sys.which("python")
+  if (nzchar(python)) {
+    return(unname(python))
+  }
+
+  "python3"
+}
 
 run_validation_tests <- function() {
   cat("\nValidation\n")
@@ -453,7 +474,7 @@ run_end_to_end_tests <- function() {
     seed = 2202L,
     n_cores = 1L,
     xgb_n_trials = 10L,
-    python_bin = "python"
+    python_bin = .test_python_bin()
   ))
 
   fu1 <- manifest$followups$FU1
@@ -655,6 +676,8 @@ run_end_to_end_tests <- function() {
     },
     "XGB selected parameters and repeated-CV metrics are recorded"
   )
+
+  list(fixture = fixture, manifest = manifest)
 }
 
 completed_sections <- 0L
@@ -665,7 +688,10 @@ result <- tryCatch({
   run_feature_tests()
   completed_sections <- completed_sections + 1L
 
-  run_end_to_end_tests()
+  integration <- run_end_to_end_tests()
+  completed_sections <- completed_sections + 1L
+
+  run_inference_equivalence_tests(integration$fixture, integration$manifest)
   completed_sections <- completed_sections + 1L
 
   NULL
@@ -673,9 +699,9 @@ result <- tryCatch({
 
 cat("\nTest summary\n")
 cat("============\n")
-cat("Sections:         ", completed_sections, "/3\n", sep = "")
+cat("Sections:         ", completed_sections, "/4\n", sep = "")
 cat("Assertions passed:", getOption("track22.tests.passed", 0L), "\n")
-cat("Models exercised: ENET, XGB, Optuna\n")
+cat("Models exercised: ENET, XGB, Optuna, inference replay\n")
 cat("Result:           ", if (is.null(result)) "PASS" else "FAIL", "\n", sep = "")
 
 if (!is.null(result)) {
