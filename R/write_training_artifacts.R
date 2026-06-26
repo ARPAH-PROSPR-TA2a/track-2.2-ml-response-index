@@ -132,7 +132,7 @@
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
   args <- c(
-    file.path("scripts", "run_xgb.py"),
+    file.path("training", "scripts", "run_xgb.py"),
     "--data-dir", fu_dir,
     "--out-dir", out_dir,
     "--seed", as.character(seed),

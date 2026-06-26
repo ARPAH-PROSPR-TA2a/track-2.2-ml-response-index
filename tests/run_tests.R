@@ -2,15 +2,16 @@ args <- commandArgs(trailingOnly = FALSE)
 file_arg <- grep("^--file=", args, value = TRUE)
 if (length(file_arg) == 1L) {
   script_dir <- dirname(normalizePath(sub("^--file=", "", file_arg)))
-  setwd(script_dir)
+  repo_dir <- if (basename(script_dir) == "tests") dirname(script_dir) else script_dir
+  setwd(repo_dir)
 }
 
 cat("Track 2.2 test suite\n")
 cat("====================\n")
 
 options(track22.tests.passed = 0L)
-source("main.R")
-source(file.path("test_helpers", "helpers.R"))
+source(file.path("training", "main.R"))
+source(file.path("tests", "helpers.R"))
 
 required_r <- c("glmnet", "jsonlite", "pROC")
 missing_r <- required_r[!vapply(required_r, requireNamespace, logical(1), quietly = TRUE)]
@@ -434,7 +435,7 @@ run_end_to_end_tests <- function() {
   cat("===================\n")
 
   fixture <- .make_simulated_fixture(followups = 1:2)
-  output_dir <- file.path(getwd(), "test_outputs", "track22_integration")
+  output_dir <- file.path(getwd(), "tests", "test_outputs", "track22_integration")
   if (dir.exists(output_dir)) {
     unlink(output_dir, recursive = TRUE)
   }

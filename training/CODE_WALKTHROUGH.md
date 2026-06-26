@@ -50,11 +50,11 @@ FAST_treatment_ML()
 ```
 
 Each section below follows that execution order. The complete external input
-and output contract is in `INPUTS_OUTPUTS.md`.
+and output contract is in `training/INPUTS_OUTPUTS.md`.
 
 ## Public Function and Arguments
 
-File: `main.R`
+File: `training/main.R`
 
 ```r
 FAST_treatment_ML <- function(
@@ -335,7 +335,7 @@ feature set used by each model, in model-matrix order.
 
 ## Step 6: Fit ENET
 
-File: `ml_helpers.R`
+File: `R/write_training_artifacts.R`
 
 `.run_enet_worker()` fits a binomial elastic net using `glmnet`.
 
@@ -388,12 +388,12 @@ without serializing the R model object.
 
 ## Step 7: Fit XGB
 
-Files: `ml_helpers.R`, `scripts/run_xgb.py`
+Files: `R/write_training_artifacts.R`, `training/scripts/run_xgb.py`
 
 R launches the worker with:
 
 ```text
-<python_bin> scripts/run_xgb.py
+<python_bin> training/scripts/run_xgb.py
   --data-dir <FU directory>
   --out-dir <FU directory>/xgb
   --seed <seed + FU>

@@ -1,6 +1,6 @@
-source("validation_helpers.R")
-source("feature_helpers.R")
-source("ml_helpers.R")
+source(file.path("R", "validate_inputs.R"))
+source(file.path("R", "build_training_features.R"))
+source(file.path("R", "write_training_artifacts.R"))
 
 
 .validate_ml_args <- function(models, enet_cv_folds, xgb_cv_folds,
