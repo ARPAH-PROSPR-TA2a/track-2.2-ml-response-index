@@ -3,17 +3,12 @@ source("feature_helpers.R")
 source("ml_helpers.R")
 
 
-.validate_ml_args <- function(models, test_frac, enet_cv_folds, xgb_cv_folds,
+.validate_ml_args <- function(models, enet_cv_folds, xgb_cv_folds,
                               xgb_cv_repeats, seed, n_cores, xgb_n_trials) {
   allowed_models <- c("enet", "xgb")
   if (!is.character(models) || length(models) == 0L ||
       any(!models %in% allowed_models)) {
     stop("models must contain one or more of: ", paste(allowed_models, collapse = ", "))
-  }
-
-  if (!is.numeric(test_frac) || length(test_frac) != 1L ||
-      test_frac <= 0 || test_frac >= 0.5) {
-    stop("test_frac must be a single numeric value greater than 0 and less than 0.5.")
   }
 
   if (!is.numeric(enet_cv_folds) || length(enet_cv_folds) != 1L || enet_cv_folds < 2L) {
@@ -77,9 +72,8 @@ FAST_treatment_ML <- function(pheno,
                               additional_covariates = NULL,
                               models = c("enet", "xgb"),
                               output_dir = NULL,
-                              test_frac = 0.2,
-                              enet_cv_folds = 5L,
-                              xgb_cv_folds = 5L,
+                              enet_cv_folds = 10L,
+                              xgb_cv_folds = 10L,
                               xgb_cv_repeats = 3L,
                               xgb_n_trials = 50L,
                               n_cores = NULL,
@@ -87,7 +81,7 @@ FAST_treatment_ML <- function(pheno,
                               seed = 1L) {
 
   models <- .validate_ml_args(
-    models, test_frac, enet_cv_folds, xgb_cv_folds, xgb_cv_repeats,
+    models, enet_cv_folds, xgb_cv_folds, xgb_cv_repeats,
     seed, n_cores, xgb_n_trials
   )
   if (is.null(n_cores)) {
@@ -111,7 +105,6 @@ FAST_treatment_ML <- function(pheno,
     model_covariates = model_covariates,
     models = models,
     output_dir = output_dir,
-    test_frac = test_frac,
     enet_cv_folds = as.integer(enet_cv_folds),
     xgb_cv_folds = as.integer(xgb_cv_folds),
     xgb_cv_repeats = as.integer(xgb_cv_repeats),

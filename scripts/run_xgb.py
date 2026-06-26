@@ -79,19 +79,14 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     x_train_df = pd.read_csv(data_dir / "xgb_train.csv.gz")
-    x_test_df = pd.read_csv(data_dir / "xgb_test.csv.gz")
     subjects = pd.read_csv(data_dir / "subjects.csv")
     xgb_folds_df = pd.read_csv(data_dir / "xgb_folds.csv")
     y_train_df = subjects[subjects["SET"] == "train"].reset_index(drop=True)
-    y_test_df = subjects[subjects["SET"] == "test"].reset_index(drop=True)
 
     x_train = x_train_df.to_numpy(dtype=float)
-    x_test = x_test_df.to_numpy(dtype=float)
     y_train = y_train_df["TREATMENT_GROUP"].to_numpy(dtype=int)
-    y_test = y_test_df["TREATMENT_GROUP"].to_numpy(dtype=int)
 
     dtrain = xgb.DMatrix(x_train, label=y_train, feature_names=list(x_train_df.columns))
-    dtest = xgb.DMatrix(x_test, label=y_test, feature_names=list(x_train_df.columns))
     repeated_folds = build_repeated_folds(
         xgb_folds_df,
         y_train_df["SUBJECT_ID"].tolist(),
@@ -183,13 +178,11 @@ def main():
 
     model = xgb.train(params, dtrain, num_boost_round=best_iteration, verbose_eval=False)
     train_pred = model.predict(dtrain)
-    test_pred = model.predict(dtest)
 
     metrics_row = {
         "CV_AUC": cv_auc,
         "CV_AUC_SD": cv_auc_sd,
         "CV_REPEATS": len(repeated_folds),
-        "TEST_AUC": auc(y_test, test_pred),
         "INSAMPLE_AUC": auc(y_train, train_pred),
         "BEST_ITERATION": best_iteration,
         "N_FEATURES": x_train.shape[1],
@@ -198,28 +191,14 @@ def main():
     metrics = pd.DataFrame([metrics_row])
     metrics.to_csv(out_dir / "metrics.csv", index=False)
 
-    predictions = pd.concat(
-        [
-            pd.DataFrame(
-                {
-                    "SET": "train",
-                    "SUBJECT_ID": y_train_df["SUBJECT_ID"],
-                    "FU": y_train_df["FU"],
-                    "TREATMENT_GROUP": y_train,
-                    "PREDICTED_PROB": train_pred,
-                }
-            ),
-            pd.DataFrame(
-                {
-                    "SET": "test",
-                    "SUBJECT_ID": y_test_df["SUBJECT_ID"],
-                    "FU": y_test_df["FU"],
-                    "TREATMENT_GROUP": y_test,
-                    "PREDICTED_PROB": test_pred,
-                }
-            ),
-        ],
-        ignore_index=True,
+    predictions = pd.DataFrame(
+        {
+            "SET": "train",
+            "SUBJECT_ID": y_train_df["SUBJECT_ID"],
+            "FU": y_train_df["FU"],
+            "TREATMENT_GROUP": y_train,
+            "PREDICTED_PROB": train_pred,
+        }
     )
     predictions.to_csv(out_dir / "predictions.csv", index=False)
 

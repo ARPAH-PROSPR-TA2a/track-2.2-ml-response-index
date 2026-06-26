@@ -19,9 +19,8 @@ manifest <- FAST_treatment_ML(
   additional_covariates = c("agebl", "mbmi"),
   models = c("enet", "xgb"),
   output_dir = "runs/trial_a_treatment_ml",
-  test_frac = 0.2,
-  enet_cv_folds = 5,
-  xgb_cv_folds = 5,
+  enet_cv_folds = 10,
+  xgb_cv_folds = 10,
   xgb_cv_repeats = 3,
   xgb_n_trials = 50,
   n_cores = 8,
@@ -40,7 +39,8 @@ models. Omics features are:
 omics(FU k) - omics(FU 0)
 ```
 
-Train/test splits and CV folds are subject-level and stratified by treatment.
+CV folds are subject-level and stratified by treatment. Each follow-up must have
+at least as many subjects in each treatment arm as the requested fold count.
 
 ENET receives omics changes, `FEMALE`, and every requested
 `additional_covariates` variable. XGB receives omics changes plus `FEMALE`;
@@ -79,7 +79,7 @@ reproduce predictions without a saved R model object.
 
 XGB runs through `scripts/run_xgb.py`. Each parameter set is evaluated across
 `xgb_cv_repeats` independent stratified fold assignments and scored by mean CV
-AUC. By default, 50 Optuna trials are evaluated across three 5-fold repeats.
+AUC. By default, 50 Optuna trials are evaluated across three 10-fold repeats.
 XGB always uses Optuna tuning: at least 10 trials are required, and fewer than
 30 produce a limited-search warning. Outputs include metrics and selected
 parameters, predictions, feature importance, tuning history, and the fitted
@@ -104,9 +104,7 @@ output_dir/
     preprocessing.csv
   FU1/
     enet_train.csv.gz
-    enet_test.csv.gz
     xgb_train.csv.gz
-    xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
     enet/
@@ -122,12 +120,13 @@ output_dir/
 ```
 
 The model-ready matrices contain exactly the columns consumed by each model.
-`subjects.csv` combines outcomes, train/test assignment, and ENET fold
-assignment. `xgb_folds.csv` stores every repeated XGB fold assignment.
+`subjects.csv` combines outcomes and ENET fold assignment. `xgb_folds.csv`
+stores every repeated XGB fold assignment.
 Top-level reports stack information across follow-ups: `reports/cohort.csv`
-records eligible/train/test counts, `reports/change_summary.csv` describes raw
+records eligible/train counts, `reports/change_summary.csv` describes raw
 change scores, and `reports/preprocessing.csv` audits feature transformations
-and removals. Run settings and artifact paths are stored once in
+and removals while recording the preprocessing recipe needed to reconstruct
+model matrices. Run settings and artifact paths are stored once in
 `manifest.json`.
 
 See `INPUTS_OUTPUTS.md` for schemas.

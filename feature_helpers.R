@@ -7,7 +7,7 @@
 }
 
 
-.validate_followup_cohort <- function(pheno_df, test_frac, min_train_per_class) {
+.validate_followup_cohort <- function(pheno_df, fold_counts) {
   subject_rows <- pheno_df[!duplicated(pheno_df$SUBJECT_ID), c("SUBJECT_ID", "TREATMENT_GROUP")]
   subject_rows$Y <- .as_binary_numeric(subject_rows$TREATMENT_GROUP)
 
@@ -17,12 +17,14 @@
   }
 
   class_counts <- as.integer(class_counts[c("0", "1")])
-  test_counts <- pmax(1L, floor(class_counts * test_frac))
-  train_counts <- class_counts - test_counts
-  if (any(train_counts < min_train_per_class)) {
+  min_class_count <- min(class_counts)
+  too_many <- fold_counts[fold_counts > min_class_count]
+  if (length(too_many) > 0L) {
     return(paste0(
-      "each treatment arm must retain at least ", min_train_per_class,
-      " training subjects after the test split"
+      "requested CV folds exceed the smaller treatment arm (",
+      min_class_count, " subjects): ",
+      paste(names(too_many), too_many, sep = "=", collapse = ", "),
+      ". Use ", min_class_count, " folds or fewer"
     ))
   }
 
@@ -30,28 +32,7 @@
 }
 
 
-.stratified_subject_split <- function(pheno_df, test_frac = 0.2, seed = 1L) {
-  subject_rows <- pheno_df[!duplicated(pheno_df$SUBJECT_ID), c("SUBJECT_ID", "TREATMENT_GROUP")]
-  subject_rows$Y <- .as_binary_numeric(subject_rows$TREATMENT_GROUP)
-
-  set.seed(seed)
-  test_subjects <- character(0)
-  for (class_value in c(0L, 1L)) {
-    ids <- subject_rows$SUBJECT_ID[subject_rows$Y == class_value]
-    n_test <- max(1L, floor(length(ids) * test_frac))
-    test_subjects <- c(test_subjects, sample(ids, n_test))
-  }
-
-  train_subjects <- setdiff(subject_rows$SUBJECT_ID, test_subjects)
-
-  list(
-    train_subjects = train_subjects,
-    test_subjects = test_subjects
-  )
-}
-
-
-.stratified_subject_folds <- function(subject_ids, y, cv_folds = 5L, seed = 1L) {
+.stratified_subject_folds <- function(subject_ids, y, cv_folds = 10L, seed = 1L) {
   if (length(subject_ids) != length(y)) {
     stop("subject_ids and y must have the same length.")
   }
@@ -82,55 +63,49 @@
 }
 
 
-.scale_train_test <- function(x_train, x_test) {
+.scale_train <- function(x_train) {
   centers <- colMeans(x_train, na.rm = TRUE)
   scales <- apply(x_train, 2, sd, na.rm = TRUE)
   scales[is.na(scales) | scales == 0] <- 1
 
   x_train_scaled <- sweep(x_train, 2, centers, "-")
   x_train_scaled <- sweep(x_train_scaled, 2, scales, "/")
-  x_test_scaled <- sweep(x_test, 2, centers, "-")
-  x_test_scaled <- sweep(x_test_scaled, 2, scales, "/")
 
   list(
     train = x_train_scaled,
-    test = x_test_scaled,
     center = centers,
     scale = scales
   )
 }
 
 
-.drop_all_missing_train <- function(x_train, x_test) {
+.drop_all_missing_train <- function(x_train) {
   keep <- colSums(!is.na(x_train)) > 0L
 
   list(
     train = x_train[, keep, drop = FALSE],
-    test = x_test[, keep, drop = FALSE],
     keep = keep
   )
 }
 
 
-.impute_train_median <- function(x_train, x_test) {
+.impute_train_median <- function(x_train) {
   medians <- apply(x_train, 2, median, na.rm = TRUE)
 
   for (j in seq_len(ncol(x_train))) {
     x_train[is.na(x_train[, j]), j] <- medians[j]
-    x_test[is.na(x_test[, j]), j] <- medians[j]
   }
 
-  list(train = x_train, test = x_test, medians = medians)
+  list(train = x_train, medians = medians)
 }
 
 
-.drop_zero_variance_train <- function(x_train, x_test) {
+.drop_zero_variance_train <- function(x_train) {
   vars <- apply(x_train, 2, var, na.rm = TRUE)
   keep <- !is.na(vars) & vars > 1e-12
 
   list(
     train = x_train[, keep, drop = FALSE],
-    test = x_test[, keep, drop = FALSE],
     keep = keep
   )
 }
@@ -172,11 +147,10 @@
 }
 
 
-.make_cohort_report <- function(pheno_followup, train_count) {
+.make_cohort_report <- function(pheno_followup) {
   sets <- list(
     eligible = seq_len(nrow(pheno_followup)),
-    train = seq_len(train_count),
-    test = seq.int(train_count + 1L, nrow(pheno_followup))
+    train = seq_len(nrow(pheno_followup))
   )
 
   rows <- lapply(names(sets), function(set_name) {
@@ -223,11 +197,10 @@
 }
 
 
-.make_change_summary <- function(change_matrix, y, train_count, fu_level) {
+.make_change_summary <- function(change_matrix, y, fu_level) {
   sets <- list(
     eligible = seq_len(nrow(change_matrix)),
-    train = seq_len(train_count),
-    test = seq.int(train_count + 1L, nrow(change_matrix))
+    train = seq_len(nrow(change_matrix))
   )
 
   rows <- list()
@@ -265,7 +238,7 @@
 }
 
 
-.prepare_covariate_matrices <- function(train_pheno, test_pheno, additional_covariates = NULL) {
+.prepare_covariate_matrices <- function(train_pheno, additional_covariates = NULL) {
   if (is.null(additional_covariates) || length(additional_covariates) == 0L) {
     return(list(
       train = NULL,
@@ -276,8 +249,7 @@
   }
 
   train_cov <- train_pheno[, additional_covariates, drop = FALSE]
-  test_cov <- test_pheno[, additional_covariates, drop = FALSE]
-  combined <- rbind(train_cov, test_cov)
+  combined <- train_cov
 
   for (col in names(combined)) {
     if (col == "FEMALE") {
@@ -289,21 +261,19 @@
 
   mm <- model.matrix(~ . - 1, data = combined)
   train_mm <- mm[seq_len(nrow(train_cov)), , drop = FALSE]
-  test_mm <- mm[(nrow(train_cov) + 1L):nrow(mm), , drop = FALSE]
 
-  nonmissing <- .drop_all_missing_train(train_mm, test_mm)
-  imputed <- .impute_train_median(nonmissing$train, nonmissing$test)
-  dropped <- .drop_zero_variance_train(imputed$train, imputed$test)
-  scaled <- .scale_train_test(dropped$train, dropped$test)
+  nonmissing <- .drop_all_missing_train(train_mm)
+  imputed <- .impute_train_median(nonmissing$train)
+  dropped <- .drop_zero_variance_train(imputed$train)
+  scaled <- .scale_train(dropped$train)
   retained_names <- colnames(scaled$train)
   xgb_feature_names <- paste0(
     "covariate::",
-    retained_names[startsWith(retained_names, "FEMALE")]
+    retained_names[retained_names == "FEMALE"]
   )
 
   list(
     train = scaled$train,
-    test = scaled$test,
     feature_names = colnames(scaled$train),
     preprocessing = .make_preprocessing_table(
       feature_type = "covariate",
@@ -321,10 +291,10 @@
 }
 
 
-.prepare_fu_change_dataset <- function(pheno_df, omics_df, fu_level, split,
+.prepare_fu_change_dataset <- function(pheno_df, omics_df, fu_level,
                                        model_covariates = "FEMALE",
-                                       enet_cv_folds = 5L,
-                                       xgb_cv_folds = 5L,
+                                       enet_cv_folds = 10L,
+                                       xgb_cv_folds = 10L,
                                        xgb_cv_repeats = 3L,
                                        seed = 1L) {
   fu_num <- as.integer(as.character(pheno_df$FU))
@@ -332,26 +302,22 @@
   pheno_followup <- pheno_df[fu_num == fu_level, ]
 
   complete_subjects <- intersect(pheno_baseline$SUBJECT_ID, pheno_followup$SUBJECT_ID)
-  complete_subjects <- intersect(complete_subjects, c(split$train_subjects, split$test_subjects))
+  train_subjects <- intersect(pheno_followup$SUBJECT_ID, complete_subjects)
 
-  train_subjects <- intersect(split$train_subjects, complete_subjects)
-  test_subjects <- intersect(split$test_subjects, complete_subjects)
-
-  if (length(train_subjects) == 0L || length(test_subjects) == 0L) {
-    warning("FU", fu_level, ": no train/test subjects after requiring baseline and follow-up.")
+  if (length(train_subjects) == 0L) {
+    warning("FU", fu_level, ": no subjects after requiring baseline and follow-up.")
     return(NULL)
   }
 
-  ordered_subjects <- c(train_subjects, test_subjects)
+  ordered_subjects <- train_subjects
   pheno_baseline <- pheno_baseline[match(ordered_subjects, pheno_baseline$SUBJECT_ID), ]
   pheno_followup <- pheno_followup[match(ordered_subjects, pheno_followup$SUBJECT_ID), ]
 
   y <- .as_binary_numeric(pheno_followup$TREATMENT_GROUP)
   train_idx <- seq_along(train_subjects)
-  test_idx <- seq.int(length(train_subjects) + 1L, length(ordered_subjects))
 
-  if (length(unique(y[train_idx])) < 2L || length(unique(y[test_idx])) < 2L) {
-    warning("FU", fu_level, ": train and test sets must each contain both treatment arms.")
+  if (length(unique(y[train_idx])) < 2L) {
+    warning("FU", fu_level, ": training subjects must contain both treatment arms.")
     return(NULL)
   }
 
@@ -361,11 +327,10 @@
   colnames(change_matrix) <- omics_df$ANALYTE_NAME
 
   omics_train <- change_matrix[train_idx, , drop = FALSE]
-  omics_test <- change_matrix[test_idx, , drop = FALSE]
-  nonmissing <- .drop_all_missing_train(omics_train, omics_test)
-  imputed <- .impute_train_median(nonmissing$train, nonmissing$test)
-  dropped <- .drop_zero_variance_train(imputed$train, imputed$test)
-  scaled <- .scale_train_test(dropped$train, dropped$test)
+  nonmissing <- .drop_all_missing_train(omics_train)
+  imputed <- .impute_train_median(nonmissing$train)
+  dropped <- .drop_zero_variance_train(imputed$train)
+  scaled <- .scale_train(dropped$train)
   retained_omics <- paste0("omics::", colnames(scaled$train))
   omics_preprocessing <- .make_preprocessing_table(
     feature_type = "omics",
@@ -380,35 +345,27 @@
     fu_level = fu_level
   )
   colnames(scaled$train) <- paste0("omics::", colnames(scaled$train))
-  colnames(scaled$test) <- colnames(scaled$train)
 
   train_pheno <- pheno_followup[train_idx, , drop = FALSE]
-  test_pheno <- pheno_followup[test_idx, , drop = FALSE]
   model_covariates <- unique(c("FEMALE", model_covariates))
-  covariates <- .prepare_covariate_matrices(train_pheno, test_pheno, model_covariates)
+  covariates <- .prepare_covariate_matrices(train_pheno, model_covariates)
   if (!is.null(covariates$train)) {
     colnames(covariates$train) <- paste0("covariate::", colnames(covariates$train))
-    colnames(covariates$test) <- colnames(covariates$train)
   }
 
   enet_train <- scaled$train
-  enet_test <- scaled$test
 
   if (!is.null(covariates$train)) {
     enet_train <- cbind(enet_train, covariates$train)
-    enet_test <- cbind(enet_test, covariates$test)
   }
 
-  female_columns <- startsWith(colnames(covariates$train), "covariate::FEMALE")
+  female_columns <- colnames(covariates$train) == "covariate::FEMALE"
   xgb_covariates <- list(
-    train = covariates$train[, female_columns, drop = FALSE],
-    test = covariates$test[, female_columns, drop = FALSE]
+    train = covariates$train[, female_columns, drop = FALSE]
   )
   xgb_train <- scaled$train
-  xgb_test <- scaled$test
   if (ncol(xgb_covariates$train) > 0L) {
     xgb_train <- cbind(xgb_train, xgb_covariates$train)
-    xgb_test <- cbind(xgb_test, xgb_covariates$test)
   }
 
   enet_foldid <- .stratified_subject_folds(
@@ -445,20 +402,15 @@
   list(
     fu_level = fu_level,
     subject_ids_train = train_subjects,
-    subject_ids_test = test_subjects,
     y_train = y[train_idx],
-    y_test = y[test_idx],
     enet_foldid = enet_foldid,
     xgb_folds = do.call(rbind, xgb_fold_rows),
     enet_x_train = enet_train,
-    enet_x_test = enet_test,
     xgb_x_train = xgb_train,
-    xgb_x_test = xgb_test,
-    cohort = .make_cohort_report(pheno_followup, length(train_subjects)),
+    cohort = .make_cohort_report(pheno_followup),
     change_summary = .make_change_summary(
       change_matrix,
       y,
-      length(train_subjects),
       fu_level
     ),
     preprocessing = rbind(omics_preprocessing, covariates$preprocessing)

@@ -186,6 +186,9 @@
   }
   
   analyte_names <- omics$ANALYTE_NAME
+  if (any(duplicated(analyte_names))) {
+    stop("ANALYTE_NAME contains duplicate values")
+  }
   
   # Remove ANALYTE_NAME column to get numeric data
   omics_numeric <- omics[, setdiff(names(omics), "ANALYTE_NAME"), drop = FALSE]

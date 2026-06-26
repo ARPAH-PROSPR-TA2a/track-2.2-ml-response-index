@@ -54,9 +54,7 @@ output_dir/
     preprocessing.csv
   FU1/
     enet_train.csv.gz
-    enet_test.csv.gz
     xgb_train.csv.gz
-    xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
     enet/
@@ -77,8 +75,8 @@ modeling strata.
 
 ### Model Matrices
 
-`enet_train.csv.gz`, `enet_test.csv.gz`, `xgb_train.csv.gz`, and
-`xgb_test.csv.gz` are the exact numeric matrices passed to each worker.
+`enet_train.csv.gz` and `xgb_train.csv.gz` are the exact numeric matrices
+passed to each worker.
 
 Column prefixes identify provenance:
 
@@ -91,9 +89,9 @@ Column prefixes identify provenance:
 |:---|:---|
 | `SUBJECT_ID` | Subject identifier |
 | `FU` | Follow-up modeled |
-| `SET` | `train` or `test` |
+| `SET` | `train` |
 | `TREATMENT_GROUP` | Outcome |
-| `ENET_FOLD_ID` | ENET CV fold for training rows; blank for test rows |
+| `ENET_FOLD_ID` | ENET CV fold |
 
 ### `xgb_folds.csv`
 
@@ -107,13 +105,13 @@ Contains the repeated XGB cross-validation assignments:
 
 ### `reports/cohort.csv`
 
-Contains one row each for the eligible, training, and test cohorts for every
-modelable follow-up:
+Contains one row each for the eligible and training cohorts for every modelable
+follow-up. These rows contain the same subjects.
 
 | Column | Meaning |
 |:---|:---|
 | `FU` | Follow-up modeled |
-| `SET` | `eligible`, `train`, or `test` |
+| `SET` | `eligible` or `train` |
 | `N_SUBJECTS` | Number of subjects |
 | `N_CONTROL` | Control-arm subjects |
 | `N_TREATMENT` | Treatment-arm subjects |
@@ -134,7 +132,7 @@ omics(FU k) - omics(FU 0)
 | Column | Meaning |
 |:---|:---|
 | `FU` | Follow-up modeled |
-| `SET` | `eligible`, `train`, or `test` |
+| `SET` | `eligible` or `train` |
 | `TREATMENT_GROUP` | `0` or `1` |
 | `ANALYTE_NAME` | Omics feature |
 | `N_SUBJECTS` | Subjects in the set and treatment arm |
@@ -143,7 +141,9 @@ omics(FU k) - omics(FU 0)
 
 ### `reports/preprocessing.csv`
 
-Contains one row per candidate omics or encoded covariate feature:
+Contains one row per candidate omics or encoded covariate feature. This file is
+both an audit table and the serialized preprocessing recipe for reconstructing
+model matrices on future data.
 
 | Column | Meaning |
 |:---|:---|
@@ -157,7 +157,10 @@ Contains one row per candidate omics or encoded covariate feature:
 | `IN_ENET` | Whether the final ENET matrix contains the feature |
 | `IN_XGB` | Whether the final XGB matrix contains the feature |
 
-Unavailable transformation values are blank for removed features.
+Unavailable transformation values are blank for removed features. For a given
+follow-up and model, filtering to retained rows with `IN_ENET` or `IN_XGB`
+defines the model feature set. The filtered row order is the required matrix
+column order.
 
 ### `manifest.json`
 
@@ -169,7 +172,6 @@ and paths to every emitted artifact.
 `enet/metrics.csv` contains:
 
 - `CV_AUC`
-- `TEST_AUC`
 - `INSAMPLE_AUC`
 - `LAMBDA`
 - `LAMBDA_1SE`
@@ -202,8 +204,8 @@ without an R model object. The selected lambda remains in `metrics.csv`.
 
 ## XGB Output
 
-`xgb/metrics.csv` contains mean repeated-CV AUC, CV AUC SD, repeat count, test
-and in-sample AUCs, median best iteration, feature count, and selected XGBoost
+`xgb/metrics.csv` contains mean repeated-CV AUC, CV AUC SD, repeat count,
+in-sample AUC, median best iteration, feature count, and selected XGBoost
 parameters.
 
 `xgb/predictions.csv` uses the same schema as ENET predictions.

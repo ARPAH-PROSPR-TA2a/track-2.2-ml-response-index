@@ -83,6 +83,14 @@ run_validation_tests <- function() {
     "omics without shared samples are rejected"
   )
 
+  duplicate_analytes <- fixture$omics
+  duplicate_analytes$ANALYTE_NAME[2] <- duplicate_analytes$ANALYTE_NAME[1]
+  .expect_error(
+    suppressWarnings(.validate_omics(duplicate_analytes, validated_pheno)),
+    "ANALYTE_NAME contains duplicate values",
+    "duplicate analyte names are rejected"
+  )
+
   validated_omics <- suppressWarnings(.validate_omics(fixture$omics, validated_pheno))
   .expect_true(
     is.data.frame(validated_omics) &&
@@ -94,7 +102,6 @@ run_validation_tests <- function() {
   .expect_error(
     .validate_ml_args(
       models = "xgb",
-      test_frac = 0.2,
       enet_cv_folds = 5L,
       xgb_cv_folds = 5L,
       xgb_cv_repeats = 3L,
@@ -110,7 +117,6 @@ run_validation_tests <- function() {
   invisible(withCallingHandlers(
     .validate_ml_args(
       models = "xgb",
-      test_frac = 0.2,
       enet_cv_folds = 5L,
       xgb_cv_folds = 5L,
       xgb_cv_repeats = 3L,
@@ -134,7 +140,6 @@ run_validation_tests <- function() {
   .expect_equal(
     suppressWarnings(.validate_ml_args(
       models = "enet",
-      test_frac = 0.2,
       enet_cv_folds = 5L,
       xgb_cv_folds = 5L,
       xgb_cv_repeats = 3L,
@@ -153,11 +158,10 @@ run_validation_tests <- function() {
   .expect_equal(
     .validate_followup_cohort(
       too_small,
-      test_frac = 0.2,
-      min_train_per_class = 3L
+      c(enet_cv_folds = 4L, xgb_cv_folds = 2L)
     ),
-    "each treatment arm must retain at least 3 training subjects after the test split",
-    "undersized follow-up cohorts are rejected before splitting"
+    "requested CV folds exceed the smaller treatment arm (3 subjects): enet_cv_folds=4. Use 3 folds or fewer",
+    "undersized follow-up cohorts reject too many CV folds"
   )
 
   large_enough <- data.frame(
@@ -167,21 +171,9 @@ run_validation_tests <- function() {
   .expect_true(
     is.null(.validate_followup_cohort(
       large_enough,
-      test_frac = 0.2,
-      min_train_per_class = 3L
+      c(enet_cv_folds = 4L, xgb_cv_folds = 3L)
     )),
-    "follow-up cohorts with enough post-split training subjects pass validation"
-  )
-
-  validated_split <- .stratified_subject_split(
-    large_enough,
-    test_frac = 0.2,
-    seed = 1L
-  )
-  .expect_equal(
-    length(validated_split$test_subjects),
-    2L,
-    "validated stratified split assigns one test subject per arm"
+    "follow-up cohorts with enough subjects pass fold validation"
   )
 }
 
@@ -194,7 +186,6 @@ run_feature_tests <- function() {
     pheno_df = fixture$pheno,
     omics_df = fixture$omics,
     fu_level = 1L,
-    split = fixture$split,
     model_covariates = "age",
     enet_cv_folds = 2L,
     xgb_cv_folds = 2L,
@@ -202,22 +193,12 @@ run_feature_tests <- function() {
     seed = 1L
   )
 
-  .expect_equal(prepared$subject_ids_train, paste0("S", 1:4), "training subjects stay aligned")
-  .expect_equal(prepared$subject_ids_test, paste0("S", 5:6), "test subjects stay aligned")
-  .expect_equal(prepared$y_train, c(0L, 1L, 0L, 1L), "training outcomes stay aligned")
-  .expect_true(
-    length(intersect(prepared$subject_ids_train, prepared$subject_ids_test)) == 0L,
-    "train and test subjects do not overlap"
-  )
+  .expect_equal(prepared$subject_ids_train, paste0("S", 1:8), "training subjects stay aligned")
+  .expect_equal(prepared$y_train, rep(0:1, 4L), "training outcomes stay aligned")
 
   missing_only_in_train <- .drop_all_missing_train(
     x_train = matrix(
       c(NA, NA, 1, 2),
-      nrow = 2,
-      dimnames = list(NULL, c("all_missing", "retained"))
-    ),
-    x_test = matrix(
-      c(10, 11, 3, 4),
       nrow = 2,
       dimnames = list(NULL, c("all_missing", "retained"))
     )
@@ -227,24 +208,12 @@ run_feature_tests <- function() {
     "retained",
     "all-missing training features are removed before imputation"
   )
-  .expect_equal(
-    colnames(missing_only_in_train$test),
-    "retained",
-    "test observations do not retain an all-missing training feature"
-  )
-
   feature_idx <- match("omics::feature_change", colnames(prepared$xgb_x_train))
-  expected_train <- as.numeric(scale(c(1, 3, 5, 7)))
-  expected_test <- (c(9, 11) - mean(c(1, 3, 5, 7))) / sd(c(1, 3, 5, 7))
+  expected_train <- as.numeric(scale(seq(1, 15, by = 2)))
   .expect_equal(
     prepared$xgb_x_train[, feature_idx],
     expected_train,
     "follow-up minus baseline is computed and scaled correctly"
-  )
-  .expect_equal(
-    prepared$xgb_x_test[, feature_idx],
-    expected_test,
-    "test changes use training scaling parameters"
   )
 
   missing_idx <- match("omics::missing_change", colnames(prepared$xgb_x_train))
@@ -252,12 +221,12 @@ run_feature_tests <- function() {
     prepared$preprocessing$MEDIAN[
       prepared$preprocessing$FEATURE_NAME == "omics::missing_change"
     ],
-    4,
+    8,
     "imputation median comes from training subjects"
   )
   .expect_equal(
-    prepared$xgb_x_train[1, missing_idx],
-    0,
+    is.finite(prepared$xgb_x_train[1, missing_idx]),
+    TRUE,
     "missing training change is median-imputed"
   )
   .expect_true(
@@ -285,7 +254,6 @@ run_feature_tests <- function() {
         pheno_df = fixture$pheno,
         omics_df = fixture$omics,
         fu_level = 1L,
-        split = fixture$split,
         model_covariates = c("FEMALE", "FEMALE", "age"),
         enet_cv_folds = 2L,
         xgb_cv_folds = 2L,
@@ -298,15 +266,37 @@ run_feature_tests <- function() {
     "explicit FEMALE entries do not create duplicate model features"
   )
 
+  female_prefix_pheno <- fixture$pheno
+  female_prefix_pheno$FEMALE_SCORE <- seq_len(nrow(female_prefix_pheno))
+  female_prefix <- .prepare_fu_change_dataset(
+    pheno_df = female_prefix_pheno,
+    omics_df = fixture$omics,
+    fu_level = 1L,
+    model_covariates = c("age", "FEMALE_SCORE"),
+    enet_cv_folds = 2L,
+    xgb_cv_folds = 2L,
+    xgb_cv_repeats = 1L,
+    seed = 1L
+  )
+  .expect_true(
+    any(startsWith(colnames(female_prefix$enet_x_train), "covariate::FEMALE_SCORE")) &&
+      !any(startsWith(colnames(female_prefix$xgb_x_train), "covariate::FEMALE_SCORE")) &&
+      identical(
+        female_prefix$preprocessing$FEATURE_NAME[
+          female_prefix$preprocessing$IN_XGB &
+            female_prefix$preprocessing$FEATURE_TYPE == "covariate"
+        ],
+        "covariate::FEMALE"
+      ),
+    "only exact FEMALE covariate enters XGB"
+  )
+
   constant_female_pheno <- fixture$pheno
-  constant_female_pheno$FEMALE[
-    constant_female_pheno$SUBJECT_ID %in% fixture$split$train_subjects
-  ] <- factor(0L, levels = 0:1)
+  constant_female_pheno$FEMALE <- factor(0L, levels = 0:1)
   constant_female <- .prepare_fu_change_dataset(
     pheno_df = constant_female_pheno,
     omics_df = fixture$omics,
     fu_level = 1L,
-    split = fixture$split,
     model_covariates = "age",
     enet_cv_folds = 2L,
     xgb_cv_folds = 2L,
@@ -319,14 +309,18 @@ run_feature_tests <- function() {
     "training-zero-variance FEMALE is removed from both models"
   )
   .expect_equal(
-    prepared$preprocessing$FEATURE_NAME[prepared$preprocessing$IN_ENET],
+    prepared$preprocessing$FEATURE_NAME[
+      prepared$preprocessing$STATUS == "retained" & prepared$preprocessing$IN_ENET
+    ],
     colnames(prepared$enet_x_train),
-    "preprocessing audit identifies retained ENET features"
+    "preprocessing recipe identifies retained ENET features in matrix order"
   )
   .expect_equal(
-    prepared$preprocessing$FEATURE_NAME[prepared$preprocessing$IN_XGB],
+    prepared$preprocessing$FEATURE_NAME[
+      prepared$preprocessing$STATUS == "retained" & prepared$preprocessing$IN_XGB
+    ],
     colnames(prepared$xgb_x_train),
-    "preprocessing audit identifies retained XGB features"
+    "preprocessing recipe identifies retained XGB features in matrix order"
   )
   .expect_equal(
     prepared$preprocessing$STATUS[
@@ -351,21 +345,21 @@ run_feature_tests <- function() {
   )
   .expect_equal(
     prepared$cohort$SET,
-    c("eligible", "train", "test"),
-    "cohort report contains eligible, train, and test rows"
+    c("eligible", "train"),
+    "cohort report contains eligible and train rows"
   )
   .expect_equal(
     prepared$cohort$N_SUBJECTS,
-    c(6L, 4L, 2L),
+    c(8L, 8L),
     "cohort report counts aligned subjects by set"
   )
   .expect_equal(
     prepared$cohort[, c("N_CONTROL", "N_TREATMENT", "N_MALE", "N_FEMALE")],
     data.frame(
-      N_CONTROL = c(3L, 2L, 1L),
-      N_TREATMENT = c(3L, 2L, 1L),
-      N_MALE = c(3L, 2L, 1L),
-      N_FEMALE = c(3L, 2L, 1L)
+      N_CONTROL = c(4L, 4L),
+      N_TREATMENT = c(4L, 4L),
+      N_MALE = c(4L, 4L),
+      N_FEMALE = c(4L, 4L)
     ),
     "cohort report counts treatment and sex by set"
   )
@@ -378,13 +372,13 @@ run_feature_tests <- function() {
   .expect_equal(
     train_control_feature[, c("N_SUBJECTS", "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX")],
     data.frame(
-      N_SUBJECTS = 2L,
-      N_NONMISSING = 2L,
-      MEAN = 3,
-      MEDIAN = 3,
-      SD = sqrt(8),
+      N_SUBJECTS = 4L,
+      N_NONMISSING = 4L,
+      MEAN = 7,
+      MEDIAN = 7,
+      SD = sqrt(80 / 3),
       MIN = 1,
-      MAX = 5
+      MAX = 13
     ),
     "change summary uses raw pre-imputation changes"
   )
@@ -423,10 +417,6 @@ run_feature_tests <- function() {
     pheno_df = missing_visit_pheno,
     omics_df = fixture$omics,
     fu_level = 1L,
-    split = list(
-      train_subjects = paste0("S", 1:6),
-      test_subjects = paste0("S", 7:8)
-    ),
     enet_cv_folds = 2L,
     xgb_cv_folds = 2L,
     xgb_cv_repeats = 3L,
@@ -434,7 +424,7 @@ run_feature_tests <- function() {
   )
   .expect_true(
     !"S4" %in% prepared_missing$subject_ids_train &&
-      all(c("S1", "S2", "S3", "S5", "S6") %in% prepared_missing$subject_ids_train),
+      all(c("S1", "S2", "S3", "S5", "S6", "S7", "S8") %in% prepared_missing$subject_ids_train),
     "a missing visit excludes only that subject from the follow-up dataset"
   )
 }
@@ -456,7 +446,6 @@ run_end_to_end_tests <- function() {
     additional_covariates = c("age", "bmi", "site", "smoker"),
     models = c("enet", "xgb"),
     output_dir = output_dir,
-    test_frac = 0.2,
     enet_cv_folds = 5L,
     xgb_cv_folds = 5L,
     xgb_cv_repeats = 3L,
@@ -482,27 +471,16 @@ run_end_to_end_tests <- function() {
   subjects <- read.csv(fu1$artifacts$subjects, stringsAsFactors = FALSE)
   xgb_folds <- read.csv(fu1$artifacts$xgb_folds, stringsAsFactors = FALSE)
   enet_train <- read.csv(fu1$artifacts$enet_train, check.names = FALSE)
-  enet_test <- read.csv(fu1$artifacts$enet_test, check.names = FALSE)
   xgb_train <- read.csv(fu1$artifacts$xgb_train, check.names = FALSE)
-  xgb_test <- read.csv(fu1$artifacts$xgb_test, check.names = FALSE)
   cohort <- read.csv(manifest$reports$cohort, stringsAsFactors = FALSE)
   change_summary <- read.csv(manifest$reports$change_summary, stringsAsFactors = FALSE)
   preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
 
   .expect_true(
-    length(intersect(
-      subjects$SUBJECT_ID[subjects$SET == "train"],
-      subjects$SUBJECT_ID[subjects$SET == "test"]
-    )) == 0L,
-    "integration split has no subject overlap"
-  )
-  .expect_true(
-    nrow(enet_train) == sum(subjects$SET == "train") &&
-      nrow(enet_test) == sum(subjects$SET == "test") &&
+    identical(unique(subjects$SET), "train") &&
+      nrow(enet_train) == sum(subjects$SET == "train") &&
       nrow(xgb_train) == sum(subjects$SET == "train") &&
-      nrow(xgb_test) == sum(subjects$SET == "test") &&
-      all(!is.na(subjects$ENET_FOLD_ID[subjects$SET == "train"])) &&
-      all(is.na(subjects$ENET_FOLD_ID[subjects$SET == "test"])),
+      all(!is.na(subjects$ENET_FOLD_ID[subjects$SET == "train"])),
     "canonical artifact row counts agree"
   )
   .expect_true(
@@ -536,12 +514,11 @@ run_end_to_end_tests <- function() {
       )
     ) &&
       identical(sort(unique(cohort$FU)), 1:2) &&
-      all(table(cohort$FU) == 3L) &&
-      all(c("eligible", "train", "test") %in% cohort$SET) &&
+      all(table(cohort$FU) == 2L) &&
+      all(c("eligible", "train") %in% cohort$SET) &&
       cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "eligible"] == nrow(subjects) &&
-      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "train"] == sum(subjects$SET == "train") &&
-      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "test"] == sum(subjects$SET == "test"),
-    "cohort artifact stacks eligible, train, and test subjects across follow-ups"
+      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "train"] == sum(subjects$SET == "train"),
+    "cohort artifact stacks eligible and train subjects across follow-ups"
   )
   .expect_true(
     identical(
@@ -552,7 +529,7 @@ run_end_to_end_tests <- function() {
       )
     ) &&
       identical(sort(unique(change_summary$FU)), 1:2) &&
-      all(c("eligible", "train", "test") %in% change_summary$SET) &&
+      all(c("eligible", "train") %in% change_summary$SET) &&
       all(0:1 %in% change_summary$TREATMENT_GROUP) &&
       all(change_summary$ANALYTE_NAME %in% fixture$omics$ANALYTE_NAME),
     "change summary artifact stacks raw changes by set and treatment"
@@ -566,14 +543,6 @@ run_end_to_end_tests <- function() {
       )
     ) &&
       identical(sort(unique(preprocessing$FU)), 1:2) &&
-      identical(
-        preprocessing$FEATURE_NAME[preprocessing$FU == 1L & preprocessing$IN_ENET],
-        names(enet_train)
-      ) &&
-      identical(
-        preprocessing$FEATURE_NAME[preprocessing$FU == 1L & preprocessing$IN_XGB],
-        names(xgb_train)
-      ) &&
       all(
         is.finite(as.matrix(
           preprocessing[
@@ -585,6 +554,31 @@ run_end_to_end_tests <- function() {
     "preprocessing CSV audits retained and removed model features"
   )
 
+  for (fu_key in names(manifest$followups)) {
+    fu_manifest <- manifest$followups[[fu_key]]
+    if (is.null(fu_manifest)) next
+
+    fu_level <- as.integer(sub("^FU", "", fu_key))
+    fu_preprocessing <- preprocessing[preprocessing$FU == fu_level, , drop = FALSE]
+    enet_columns <- names(read.csv(fu_manifest$artifacts$enet_train, check.names = FALSE))
+    xgb_columns <- names(read.csv(fu_manifest$artifacts$xgb_train, check.names = FALSE))
+
+    .expect_equal(
+      fu_preprocessing$FEATURE_NAME[
+        fu_preprocessing$STATUS == "retained" & fu_preprocessing$IN_ENET
+      ],
+      enet_columns,
+      paste(fu_key, "preprocessing order defines ENET matrix columns")
+    )
+    .expect_equal(
+      fu_preprocessing$FEATURE_NAME[
+        fu_preprocessing$STATUS == "retained" & fu_preprocessing$IN_XGB
+      ],
+      xgb_columns,
+      paste(fu_key, "preprocessing order defines XGB matrix columns")
+    )
+  }
+
   for (model_name in c("enet", "xgb")) {
     model <- fu1$models[[model_name]]
     .expect_true(
@@ -594,7 +588,8 @@ run_end_to_end_tests <- function() {
     metrics <- read.csv(model$metrics)
     .expect_true(
       nrow(metrics) == 1L &&
-        all(c("CV_AUC", "TEST_AUC", "INSAMPLE_AUC") %in% names(metrics)),
+        all(c("CV_AUC", "INSAMPLE_AUC") %in% names(metrics)) &&
+        !"TEST_AUC" %in% names(metrics),
       paste(model_name, "metrics schema")
     )
     .assert_probability_file(model$predictions, nrow(subjects))
@@ -622,7 +617,7 @@ run_end_to_end_tests <- function() {
   enet_predictions <- read.csv(fu1$models$enet$predictions, stringsAsFactors = FALSE)
   intercept <- enet_weights$WEIGHT[enet_weights$FEATURE_NAME == "(Intercept)"]
   feature_weights <- enet_weights[enet_weights$FEATURE_NAME != "(Intercept)", ]
-  score_matrix <- rbind(enet_train, enet_test)
+  score_matrix <- enet_train
   linear_predictor <- rep(intercept, nrow(score_matrix))
   if (nrow(feature_weights) > 0L) {
     linear_predictor <- linear_predictor +

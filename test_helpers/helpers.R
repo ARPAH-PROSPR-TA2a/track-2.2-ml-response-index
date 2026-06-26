@@ -64,8 +64,8 @@
 
   feature_change <- c(1, 3, 5, 7, 9, 11, 13, 15)
   missing_change <- c(NA, 2, 4, 6, 100, 8, 10, 12)
-  constant_change <- c(5, 5, 5, 5, 20, 20, 20, 20)
-  all_missing_training <- c(NA, NA, NA, NA, 30, 31, 32, 33)
+  constant_change <- rep(5, 8L)
+  all_missing_training <- rep(NA_real_, 8L)
   sample_ids <- pheno$SAMPLE_ID
 
   make_values <- function(changes) {
@@ -93,11 +93,7 @@
 
   list(
     pheno = pheno,
-    omics = omics,
-    split = list(
-      train_subjects = subjects[1:4],
-      test_subjects = subjects[5:6]
-    )
+    omics = omics
   )
 }
 
@@ -165,7 +161,7 @@
   )
   .expect_true(
     nrow(predictions) == expected_subjects &&
-      all(c("train", "test") %in% predictions$SET),
+      identical(unique(predictions$SET), "train"),
     paste(basename(dirname(path)), "prediction rows")
   )
   .expect_true(

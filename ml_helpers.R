@@ -22,28 +22,16 @@
   dir.create(fu_dir, recursive = TRUE, showWarnings = FALSE)
 
   .write_matrix_csv_gz(dataset$enet_x_train, file.path(fu_dir, "enet_train.csv.gz"))
-  .write_matrix_csv_gz(dataset$enet_x_test, file.path(fu_dir, "enet_test.csv.gz"))
   .write_matrix_csv_gz(dataset$xgb_x_train, file.path(fu_dir, "xgb_train.csv.gz"))
-  .write_matrix_csv_gz(dataset$xgb_x_test, file.path(fu_dir, "xgb_test.csv.gz"))
 
   .write_csv(
-    rbind(
-      data.frame(
-        SUBJECT_ID = dataset$subject_ids_train,
-        FU = dataset$fu_level,
-        SET = "train",
-        TREATMENT_GROUP = dataset$y_train,
-        ENET_FOLD_ID = dataset$enet_foldid,
-        stringsAsFactors = FALSE
-      ),
-      data.frame(
-        SUBJECT_ID = dataset$subject_ids_test,
-        FU = dataset$fu_level,
-        SET = "test",
-        TREATMENT_GROUP = dataset$y_test,
-        ENET_FOLD_ID = NA_integer_,
-        stringsAsFactors = FALSE
-      )
+    data.frame(
+      SUBJECT_ID = dataset$subject_ids_train,
+      FU = dataset$fu_level,
+      SET = "train",
+      TREATMENT_GROUP = dataset$y_train,
+      ENET_FOLD_ID = dataset$enet_foldid,
+      stringsAsFactors = FALSE
     ),
     file.path(fu_dir, "subjects.csv")
   )
@@ -83,7 +71,6 @@
 
   fit <- cv_fit$glmnet.fit
   train_pred <- as.numeric(predict(fit, newx = dataset$enet_x_train, s = lambda, type = "response"))
-  test_pred <- as.numeric(predict(fit, newx = dataset$enet_x_test, s = lambda, type = "response"))
 
   coefs <- as.matrix(stats::coef(fit, s = lambda))
   weights <- data.frame(
@@ -107,7 +94,6 @@
 
   metrics <- data.frame(
     CV_AUC = cv_auc,
-    TEST_AUC = .safe_auc(dataset$y_test, test_pred),
     INSAMPLE_AUC = .safe_auc(dataset$y_train, train_pred),
     LAMBDA = lambda,
     LAMBDA_1SE = cv_fit$lambda.1se,
@@ -120,23 +106,13 @@
     stringsAsFactors = FALSE
   )
 
-  predictions <- rbind(
-    data.frame(
-      SET = "train",
-      SUBJECT_ID = dataset$subject_ids_train,
-      FU = dataset$fu_level,
-      TREATMENT_GROUP = dataset$y_train,
-      PREDICTED_PROB = train_pred,
-      stringsAsFactors = FALSE
-    ),
-    data.frame(
-      SET = "test",
-      SUBJECT_ID = dataset$subject_ids_test,
-      FU = dataset$fu_level,
-      TREATMENT_GROUP = dataset$y_test,
-      PREDICTED_PROB = test_pred,
-      stringsAsFactors = FALSE
-    )
+  predictions <- data.frame(
+    SET = "train",
+    SUBJECT_ID = dataset$subject_ids_train,
+    FU = dataset$fu_level,
+    TREATMENT_GROUP = dataset$y_train,
+    PREDICTED_PROB = train_pred,
+    stringsAsFactors = FALSE
   )
 
   .write_csv(metrics, file.path(out_dir, "metrics.csv"))
@@ -182,8 +158,8 @@
 .run_ml_disk <- function(pheno_df, omics_df, additional_covariates = NULL,
                          model_covariates = "FEMALE",
                          models = c("enet", "xgb"), output_dir,
-                         test_frac = 0.2, enet_cv_folds = 5L,
-                         xgb_cv_folds = 5L, xgb_cv_repeats = 3L, seed = 1L,
+                         enet_cv_folds = 10L,
+                         xgb_cv_folds = 10L, xgb_cv_repeats = 3L, seed = 1L,
                          n_cores = 1L, python_bin = "python3",
                          xgb_n_trials = 50L) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -192,7 +168,6 @@
     target = "TREATMENT_GROUP",
     feature_mode = "change",
     requested_models = models,
-    test_frac = test_frac,
     enet_cv_folds = enet_cv_folds,
     xgb_cv_folds = xgb_cv_folds,
     xgb_cv_repeats = xgb_cv_repeats,
@@ -229,29 +204,19 @@
       drop = FALSE
     ]
 
-    cohort_issue <- .validate_followup_cohort(
-      split_pheno,
-      test_frac = test_frac,
-      min_train_per_class = max(enet_cv_folds, xgb_cv_folds)
-    )
+    requested_fold_counts <- c()
+    if ("enet" %in% models) requested_fold_counts["enet_cv_folds"] <- enet_cv_folds
+    if ("xgb" %in% models) requested_fold_counts["xgb_cv_folds"] <- xgb_cv_folds
+    cohort_issue <- .validate_followup_cohort(split_pheno, requested_fold_counts)
     if (!is.null(cohort_issue)) {
-      warning(fu_key, ": ", cohort_issue, ".")
-      manifest$followups[[fu_key]] <- NULL
-      next
+      stop(fu_key, ": ", cohort_issue, ".")
     }
-
-    split <- .stratified_subject_split(
-      split_pheno,
-      test_frac = test_frac,
-      seed = seed + fu_level
-    )
 
     message(fu_key, ": preparing model-ready datasets.")
     prepared <- .prepare_fu_change_dataset(
       pheno_df = pheno_df,
       omics_df = omics_df,
       fu_level = fu_level,
-      split = split,
       model_covariates = model_covariates,
       enet_cv_folds = enet_cv_folds,
       xgb_cv_folds = xgb_cv_folds,
@@ -268,17 +233,14 @@
     report_tables$change_summary[[fu_key]] <- prepared$change_summary
     report_tables$preprocessing[[fu_key]] <- prepared$preprocessing
     message(
-      fu_key, ": prepared ", length(prepared$subject_ids_train), " training and ",
-      length(prepared$subject_ids_test), " test subjects."
+      fu_key, ": prepared ", length(prepared$subject_ids_train), " training subjects."
     )
 
     fu_manifest <- list(
       data_dir = normalizePath(fu_dir, mustWork = FALSE),
       artifacts = list(
         enet_train = file.path(fu_dir, "enet_train.csv.gz"),
-        enet_test = file.path(fu_dir, "enet_test.csv.gz"),
         xgb_train = file.path(fu_dir, "xgb_train.csv.gz"),
-        xgb_test = file.path(fu_dir, "xgb_test.csv.gz"),
         subjects = file.path(fu_dir, "subjects.csv"),
         xgb_folds = file.path(fu_dir, "xgb_folds.csv")
       ),

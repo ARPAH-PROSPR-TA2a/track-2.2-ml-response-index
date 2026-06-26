@@ -37,7 +37,7 @@ FAST_treatment_ML()
 ├── validate pheno/omics and apply DNAm probe filtering
 ├── for each nonzero FU:
 │   ├── require baseline + FU
-│   ├── stratified train/test split
+│   ├── validate treatment arms and requested CV folds
 │   ├── compute FU - baseline omics changes
 │   ├── preprocess using train-only parameters
 │   ├── build ENET and XGB matrices
@@ -64,9 +64,8 @@ FAST_treatment_ML <- function(
   additional_covariates = NULL,
   models = c("enet", "xgb"),
   output_dir = NULL,
-  test_frac = 0.2,
-  enet_cv_folds = 5L,
-  xgb_cv_folds = 5L,
+  enet_cv_folds = 10L,
+  xgb_cv_folds = 10L,
   xgb_cv_repeats = 3L,
   xgb_n_trials = 50L,
   n_cores = NULL,
@@ -85,18 +84,17 @@ FAST_treatment_ML <- function(
 | `additional_covariates` | `NULL` | Optional phenotype columns used as ENET model covariates. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during validation. |
 | `models` | `c("enet", "xgb")` | Selects one or both model workers. |
 | `output_dir` | `NULL` | Selects the artifact directory; `NULL` creates a timestamped directory under `runs/`. |
-| `test_frac` | `0.2` | Sets the treatment-stratified held-out fraction. |
-| `enet_cv_folds` | `5L` | Requests the ENET fold count. |
-| `xgb_cv_folds` | `5L` | Requests the XGB fold count per repeat. |
+| `enet_cv_folds` | `10L` | Requests the ENET fold count. |
+| `xgb_cv_folds` | `10L` | Requests the XGB fold count per repeat. |
 | `xgb_cv_repeats` | `3L` | Sets the number of independent XGB fold assignments. |
 | `xgb_n_trials` | `50L` | Sets the required Optuna search size. XGB requires at least `10`; values below `30` produce a warning. |
 | `n_cores` | `NULL` | Sets XGBoost threads; `NULL` uses one fewer than the detected core count. |
 | `python_bin` | `NULL` | Selects the XGB Python executable; `NULL` uses `python3`. |
-| `seed` | `1L` | Controls splitting, folds, model fitting, and tuning. |
+| `seed` | `1L` | Controls folds, model fitting, and tuning. |
 
 Argument validation happens before the pipeline touches data. `.validate_ml_args()`
-checks model names, split fraction, fold counts, XGB repeat count, seed,
-runtime settings, and XGB trial count.
+checks model names, fold counts, XGB repeat count, seed, runtime settings, and
+XGB trial count.
 
 ## Step 1: Validate and Prepare Inputs
 
@@ -183,52 +181,28 @@ the ML run to the reliable Sugden/TruD probe list.
 
 ---
 
-## Step 2: Select Follow-Ups and Split Subjects
+## Step 2: Select Follow-Ups and Validate Folds
 
 After validation, `FAST_treatment_ML()` enters `.run_ml_disk()`, which finds
 every nonzero `FU` level and processes each modelable follow-up independently.
-Each follow-up receives its own train/test split. The split is created only from
-subjects with both baseline and that specific follow-up, so treatment balance
-and test-set credibility are assessed against the cohort actually available for
-that model.
+Each follow-up uses all subjects with both baseline and that specific follow-up.
 
-### Train/Test Split
-
-For each follow-up, `.stratified_subject_split()` works on one row per eligible
-`SUBJECT_ID`. Eligibility requires both baseline and the follow-up being
-modeled.
-
-For each treatment arm:
-
-```r
-n_test <- max(1L, floor(n_subjects_in_arm * test_frac))
-```
-
-It samples test subjects separately within treatment arms, then defines all
-remaining subjects as training subjects. A subject therefore cannot appear in
-both sets.
-
-Before splitting, `.run_ml_disk()` validates that both treatment arms are
-present and that each arm will retain at least:
-
-```r
-max(enet_cv_folds, xgb_cv_folds)
-```
-
-training subjects after the test allocation. If this condition fails, that
-follow-up is skipped while other follow-ups may continue.
+Before model preparation, `.run_ml_disk()` validates that both treatment arms
+are present and that the smaller arm has at least as many subjects as each
+requested fold count for the selected models. If a request is too large, the run
+stops with a message naming the offending argument and suggesting the largest
+valid fold count.
 
 ### Cross-Validation Folds
 
-`.stratified_subject_folds()` assigns training subjects to folds separately
-within each treatment arm.
+`.stratified_subject_folds()` assigns subjects to folds separately within each
+treatment arm.
 
 ENET receives one fold assignment, written to `subjects.csv` as
 `ENET_FOLD_ID`. XGB receives `xgb_cv_repeats` independently seeded assignments,
 written to `xgb_folds.csv` as `SUBJECT_ID`, `REPEAT`, and `FOLD_ID`.
 
-The train/test split, fold assignment, and model fitting for a follow-up use
-`seed + fu_level`.
+The fold assignment and model fitting for a follow-up use `seed + fu_level`.
 
 ---
 
@@ -251,14 +225,14 @@ change_matrix <- t(followup_values - baseline_values)
 Rows are subjects and columns are analytes. Subject order is explicitly:
 
 ```text
-all retained training subjects, then all retained test subjects
+all retained training subjects
 ```
 
 Treatment labels come from the follow-up phenotype rows. Preparation is skipped
 for a follow-up when:
 
-- no training or test subjects remain after requiring both visits;
-- either train or test lacks one treatment arm; or
+- no subjects remain after requiring both visits;
+- the training subjects lack one treatment arm; or
 - stratified CV folds cannot be created.
 
 Baseline omics levels are not model features. Only baseline-to-follow-up change
@@ -280,26 +254,23 @@ All learned values come from the training set.
 ### All-Missing Features
 
 `.drop_all_missing_train()` removes columns with no observed training values.
-The same columns are removed from the test set, even if test values are
-available.
 
 ### Median Imputation
 
 `.impute_train_median()` computes one median per training column and applies it
-to missing values in both train and test.
+to missing values.
 
 ### Variance Filtering
 
 `.drop_zero_variance_train()` retains columns with training variance greater
-than `1e-12`. Test-set variance does not affect feature retention.
+than `1e-12`.
 
 ### Scaling
 
-`.scale_train_test()` computes training means and standard deviations. The same
-values transform train and test. Missing or zero standard deviations are
-replaced by `1`.
+`.scale_train()` computes training means and standard deviations. Missing or
+zero standard deviations are replaced by `1`.
 
-### Preprocessing Audit
+### Preprocessing Recipe
 
 For each candidate omics or encoded covariate feature, `preprocessing.csv`
 records:
@@ -318,6 +289,10 @@ records:
 Removed features remain in the audit with their removal status and unavailable
 transformation values left blank. XGB uses retained omics features plus retained
 `FEMALE`; other retained covariates are ENET-only.
+
+The file is also the preprocessing recipe for future inference. For a given
+follow-up, the retained rows where `IN_ENET` or `IN_XGB` is true define that
+model's feature set, and their row order is the required matrix column order.
 
 ---
 
@@ -354,7 +329,7 @@ the ENET and XGB matrices can have different column counts. `FEMALE` is subject
 to the same training-only variance filtering as every other covariate.
 
 The `IN_ENET` and `IN_XGB` columns in `preprocessing.csv` identify the retained
-feature set used by each model.
+feature set used by each model, in model-matrix order.
 
 ---
 
@@ -432,7 +407,6 @@ or path through `FAST_treatment_ML(python_bin = ...)`.
 The Python worker reads:
 
 - `xgb_train.csv.gz`
-- `xgb_test.csv.gz`
 - `subjects.csv`
 - `xgb_folds.csv`
 
@@ -499,9 +473,7 @@ output_dir/
     preprocessing.csv
   FU1/
     enet_train.csv.gz
-    enet_test.csv.gz
     xgb_train.csv.gz
-    xgb_test.csv.gz
     subjects.csv
     xgb_folds.csv
     enet/
@@ -527,9 +499,9 @@ This is the shared row map for model matrices:
 |:---|:---|
 | `SUBJECT_ID` | Subject represented by the matrix row |
 | `FU` | Follow-up modeled |
-| `SET` | `train` or `test` |
+| `SET` | `train` |
 | `TREATMENT_GROUP` | Binary prediction target |
-| `ENET_FOLD_ID` | ENET CV fold for training rows; missing for test rows |
+| `ENET_FOLD_ID` | ENET CV fold |
 
 ### `xgb_folds.csv`
 
@@ -547,8 +519,7 @@ For each modeled follow-up, this file records subject, treatment-arm, and sex
 counts for:
 
 - `eligible`: subjects with baseline and the follow-up;
-- `train`: subjects assigned to model training;
-- `test`: subjects assigned to held-out evaluation.
+- `train`: subjects assigned to model training.
 
 ### `reports/change_summary.csv`
 
