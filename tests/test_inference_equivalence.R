@@ -8,8 +8,27 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
     manifest_path = manifest$manifest_path,
     models = c("enet", "xgb"),
     omics_type = "Proteomics",
-    enet_mode = "reproduce_training"
+    enet_mode = "reproduce_training",
+    output_dir = file.path(dirname(manifest$manifest_path), "inference"),
+    return_matrices = TRUE
   ))
+
+  .expect_equal(
+    names(inference$validation),
+    c(
+      "FU", "MODEL", "TRAINING_CV_AUC", "CATALOG_AUC_THRESHOLD",
+      "CATALOGED", "N", "N_CONTROL", "N_TREATMENT", "AUC",
+      "LOGIT_BETA", "LOGIT_OR", "LOGIT_P", "VALIDATED_P05"
+    ),
+    "inference validation schema"
+  )
+  .expect_true(
+    file.exists(inference$output_files$validation) &&
+      all(inference$validation$CATALOG_AUC_THRESHOLD == 0.8) &&
+      all(inference$validation$CATALOGED ==
+            (inference$validation$TRAINING_CV_AUC >= 0.8)),
+    "inference validation outputs are written and gated by training CV AUC"
+  )
 
   for (fu_key in names(manifest$followups)) {
     fu_manifest <- manifest$followups[[fu_key]]
@@ -41,6 +60,12 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
         stringsAsFactors = FALSE
       )
       inferred_predictions <- inference$predictions[[fu_key]][[model_name]]
+      validation_row <- inference$validation[
+        inference$validation$FU == fu_level &
+          inference$validation$MODEL == model_name,
+        ,
+        drop = FALSE
+      ]
 
       .expect_equal(
         names(inferred_predictions),
@@ -59,6 +84,28 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
         paste(fu_key, model_name, "inference predictions match training"),
         tolerance = if (model_name == "xgb") 1e-7 else 1e-10
       )
+      .expect_true(
+        nrow(validation_row) == 1L &&
+          validation_row$N == nrow(inferred_predictions) &&
+          validation_row$N_CONTROL == sum(inferred_predictions$TREATMENT_GROUP == 0L) &&
+          validation_row$N_TREATMENT == sum(inferred_predictions$TREATMENT_GROUP == 1L) &&
+          file.exists(inference$output_files$predictions[[fu_key]][[model_name]]),
+        paste(fu_key, model_name, "inference validation row and prediction file")
+      )
+      if (isTRUE(validation_row$CATALOGED)) {
+        direct_fit <- stats::glm(
+          TREATMENT_GROUP ~ PREDICTED_PROB,
+          data = inferred_predictions,
+          family = stats::binomial()
+        )
+        direct_p <- summary(direct_fit)$coefficients["PREDICTED_PROB", "Pr(>|z|)"]
+        .expect_equal(
+          validation_row$LOGIT_P,
+          direct_p,
+          paste(fu_key, model_name, "inference logit p-value"),
+          tolerance = 1e-10
+        )
+      }
     }
   }
 }

@@ -30,3 +30,64 @@
   dmat <- xgboost::xgb.DMatrix(as.matrix(x))
   as.numeric(stats::predict(model, dmat))
 }
+
+
+.catalog_auc_threshold <- function() {
+  0.8
+}
+
+
+.model_cv_auc <- function(model_manifest) {
+  metrics <- read.csv(model_manifest$metrics, stringsAsFactors = FALSE)
+  if (!"CV_AUC" %in% names(metrics) || nrow(metrics) != 1L) {
+    stop("Model metrics must contain exactly one CV_AUC value.")
+  }
+  as.numeric(metrics$CV_AUC)
+}
+
+
+.validation_row <- function(fu_level, model_name, predictions, training_cv_auc) {
+  cataloged <- is.finite(training_cv_auc) &&
+    training_cv_auc >= .catalog_auc_threshold()
+
+  y <- as.integer(predictions$TREATMENT_GROUP)
+  n_control <- sum(y == 0L)
+  n_treatment <- sum(y == 1L)
+
+  auc <- NA_real_
+  logit_beta <- NA_real_
+  logit_or <- NA_real_
+  logit_p <- NA_real_
+
+  if (cataloged && n_control > 0L && n_treatment > 0L) {
+    auc <- .safe_auc(y, predictions$PREDICTED_PROB)
+    fit <- stats::glm(
+      TREATMENT_GROUP ~ PREDICTED_PROB,
+      data = predictions,
+      family = stats::binomial()
+    )
+    coef_table <- summary(fit)$coefficients
+    if ("PREDICTED_PROB" %in% rownames(coef_table)) {
+      logit_beta <- unname(coef_table["PREDICTED_PROB", "Estimate"])
+      logit_or <- exp(logit_beta)
+      logit_p <- unname(coef_table["PREDICTED_PROB", "Pr(>|z|)"])
+    }
+  }
+
+  data.frame(
+    FU = fu_level,
+    MODEL = model_name,
+    TRAINING_CV_AUC = training_cv_auc,
+    CATALOG_AUC_THRESHOLD = .catalog_auc_threshold(),
+    CATALOGED = cataloged,
+    N = nrow(predictions),
+    N_CONTROL = n_control,
+    N_TREATMENT = n_treatment,
+    AUC = auc,
+    LOGIT_BETA = logit_beta,
+    LOGIT_OR = logit_or,
+    LOGIT_P = logit_p,
+    VALIDATED_P05 = is.finite(logit_p) && logit_p < 0.05,
+    stringsAsFactors = FALSE
+  )
+}

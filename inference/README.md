@@ -12,7 +12,8 @@ result <- FAST_treatment_predict(
   pheno = pheno,
   omics = omics,
   manifest_path = "runs/trial_a_treatment_ml/manifest.json",
-  models = c("enet", "xgb")
+  models = c("enet", "xgb"),
+  output_dir = "runs/trial_a_inference"
 )
 ```
 
@@ -38,5 +39,35 @@ Each prediction table contains:
 - `TREATMENT_GROUP`
 - `PREDICTED_PROB`
 
+Inference also returns `result$validation`, one row per scored follow-up/model:
+
+- `FU`
+- `MODEL`
+- `TRAINING_CV_AUC`
+- `CATALOG_AUC_THRESHOLD`
+- `CATALOGED`
+- `N`, `N_CONTROL`, `N_TREATMENT`
+- `AUC`
+- `LOGIT_BETA`, `LOGIT_OR`, `LOGIT_P`
+- `VALIDATED_P05`
+
+`CATALOGED` is hard-coded as `TRAINING_CV_AUC >= 0.8`. Logistic validation
+statistics are computed only for cataloged models, using:
+
+```text
+TREATMENT_GROUP ~ PREDICTED_PROB
+```
+
+When `output_dir` is supplied, inference writes:
+
+```text
+output_dir/
+  validation.csv
+  predictions/
+    FU1/
+      enet.csv
+      xgb.csv
+```
+
 The test suite verifies that inference replay reproduces the training matrices
-and saved predictions for ENET and XGB.
+and saved predictions for ENET and XGB, and that validation outputs are written.

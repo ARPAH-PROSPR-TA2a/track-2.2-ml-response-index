@@ -375,7 +375,7 @@ value but is not used to fit the final model.
 
 ### ENET Outputs
 
-- `metrics.csv`: pooled out-of-fold, test, and in-sample AUC; selected
+- `metrics.csv`: pooled out-of-fold and in-sample AUC; selected
   `lambda.min`; `lambda.1se`; alpha; feature counts.
 - `predictions.csv`: training-subject probabilities with subject IDs and labels.
 - `weights.csv`: intercept, nonzero omics coefficients, and every unpenalized
@@ -446,8 +446,8 @@ produce a warning because the search is limited.
 
 ### XGB Outputs
 
-- `metrics.csv`: mean and SD repeated-CV AUC, repeat count, test and in-sample
-  AUC, median best iteration, feature count, and selected parameters.
+- `metrics.csv`: mean and SD repeated-CV AUC, repeat count, in-sample AUC,
+  median best iteration, feature count, and selected parameters.
 - `predictions.csv`: training-subject probabilities.
 - `importance.csv`: gain importance and feature type.
 - `tuning.csv`: trial-level mean and SD AUC, per-repeat AUC and best iteration,
