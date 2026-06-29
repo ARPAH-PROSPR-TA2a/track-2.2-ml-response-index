@@ -489,6 +489,22 @@ run_end_to_end_tests <- function() {
 
   artifact_paths <- unlist(fu1$artifacts, use.names = FALSE)
   .expect_true(all(file.exists(artifact_paths)), "canonical artifacts are written")
+  .expect_true(
+    all(startsWith(artifact_paths, file.path(manifest$data_dir, "FU1"))) &&
+      all(startsWith(
+        unlist(fu1$models, use.names = FALSE)[
+          !grepl("predictions\\.csv$", unlist(fu1$models, use.names = FALSE))
+        ],
+        file.path(manifest$models_dir, "FU1")
+      )) &&
+      all(startsWith(
+        unlist(fu1$models, use.names = FALSE)[
+          grepl("predictions\\.csv$", unlist(fu1$models, use.names = FALSE))
+        ],
+        file.path(manifest$data_dir, "FU1")
+      )),
+    "manifest separates model artifacts from subject-level data artifacts"
+  )
 
   subjects <- read.csv(fu1$artifacts$subjects, stringsAsFactors = FALSE)
   xgb_folds <- read.csv(fu1$artifacts$xgb_folds, stringsAsFactors = FALSE)
@@ -499,15 +515,15 @@ run_end_to_end_tests <- function() {
   preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
 
   .expect_true(
-    identical(unique(subjects$SET), "train") &&
-      nrow(enet_train) == sum(subjects$SET == "train") &&
-      nrow(xgb_train) == sum(subjects$SET == "train") &&
-      all(!is.na(subjects$ENET_FOLD_ID[subjects$SET == "train"])),
+    identical(names(subjects), c("SUBJECT_ID", "FU", "TREATMENT_GROUP", "ENET_FOLD_ID")) &&
+      nrow(enet_train) == nrow(subjects) &&
+      nrow(xgb_train) == nrow(subjects) &&
+      all(!is.na(subjects$ENET_FOLD_ID)),
     "canonical artifact row counts agree"
   )
   .expect_true(
     identical(names(xgb_folds), c("SUBJECT_ID", "REPEAT", "FOLD_ID")) &&
-      nrow(xgb_folds) == sum(subjects$SET == "train") * 3L &&
+      nrow(xgb_folds) == nrow(subjects) * 3L &&
       identical(sort(unique(xgb_folds$REPEAT)), 1:3) &&
       all(table(xgb_folds$SUBJECT_ID) == 3L),
     "XGB fold artifact contains every training subject in every repeat"
@@ -539,7 +555,7 @@ run_end_to_end_tests <- function() {
       all(table(cohort$FU) == 2L) &&
       all(c("eligible", "train") %in% cohort$SET) &&
       cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "eligible"] == nrow(subjects) &&
-      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "train"] == sum(subjects$SET == "train"),
+      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "train"] == nrow(subjects),
     "cohort artifact stacks eligible and train subjects across follow-ups"
   )
   .expect_true(

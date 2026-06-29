@@ -29,7 +29,7 @@ manifest <- FAST_treatment_ML(
   seed = 1
 )
 
-read.csv("runs/trial_a_treatment_ml/FU1/enet/metrics.csv")
+read.csv("runs/trial_a_treatment_ml/models/FU1/enet/metrics.csv")
 ```
 
 ## Modeling
@@ -100,36 +100,41 @@ Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
 ```text
 output_dir/
   manifest.json
-  reports/
-    cohort.csv
-    change_summary.csv
-    preprocessing.csv
-  FU1/
-    enet_train.csv.gz
-    xgb_train.csv.gz
-    subjects.csv
-    xgb_folds.csv
-    enet/
-      metrics.csv
-      predictions.csv
-      weights.csv
-    xgb/
-      metrics.csv
-      predictions.csv
-      importance.csv
-      tuning.csv
-      model.json
+  models/
+    reports/
+      cohort.csv
+      change_summary.csv
+      preprocessing.csv
+    FU1/
+      enet/
+        metrics.csv
+        weights.csv
+      xgb/
+        metrics.csv
+        importance.csv
+        tuning.csv
+        model.json
+  data/
+    FU1/
+      enet_train.csv.gz
+      xgb_train.csv.gz
+      subjects.csv
+      xgb_folds.csv
+      enet/
+        predictions.csv
+      xgb/
+        predictions.csv
 ```
 
 The model-ready matrices contain exactly the columns consumed by each model.
 `subjects.csv` combines outcomes and ENET fold assignment. `xgb_folds.csv`
-stores every repeated XGB fold assignment.
-Top-level reports stack information across follow-ups: `reports/cohort.csv`
-records eligible/train counts, `reports/change_summary.csv` describes raw
-change scores, and `reports/preprocessing.csv` audits feature transformations
-and removals while recording the preprocessing recipe needed to reconstruct
-model matrices. Run settings and artifact paths are stored once in
-`manifest.json`.
+stores every repeated XGB fold assignment. These subject-level artifacts are
+written under `data/`.
+Reports under `models/reports/` stack information across follow-ups:
+`cohort.csv` records eligible/train counts, `change_summary.csv` describes raw
+change scores, and `preprocessing.csv` audits feature transformations and
+removals while recording the preprocessing recipe needed to reconstruct model
+matrices. Run settings and artifact paths are stored once in `manifest.json`.
 
 See [INPUTS_OUTPUTS.md](INPUTS_OUTPUTS.md) for schemas.
 

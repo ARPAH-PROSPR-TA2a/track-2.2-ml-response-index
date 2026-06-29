@@ -28,7 +28,6 @@
     data.frame(
       SUBJECT_ID = dataset$subject_ids_train,
       FU = dataset$fu_level,
-      SET = "train",
       TREATMENT_GROUP = dataset$y_train,
       ENET_FOLD_ID = dataset$enet_foldid,
       stringsAsFactors = FALSE
@@ -39,12 +38,13 @@
 }
 
 
-.run_enet_worker <- function(dataset, out_dir, seed = 1L, alpha = 0.5) {
+.run_enet_worker <- function(dataset, out_dir, data_out_dir, seed = 1L, alpha = 0.5) {
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("Package 'glmnet' is required for ENET models.")
   }
 
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(data_out_dir, recursive = TRUE, showWarnings = FALSE)
 
   penalty_factor <- ifelse(
     startsWith(colnames(dataset$enet_x_train), "covariate::"),
@@ -107,7 +107,6 @@
   )
 
   predictions <- data.frame(
-    SET = "train",
     SUBJECT_ID = dataset$subject_ids_train,
     FU = dataset$fu_level,
     TREATMENT_GROUP = dataset$y_train,
@@ -116,25 +115,27 @@
   )
 
   .write_csv(metrics, file.path(out_dir, "metrics.csv"))
-  .write_csv(predictions, file.path(out_dir, "predictions.csv"))
+  .write_csv(predictions, file.path(data_out_dir, "predictions.csv"))
   .write_csv(weights, file.path(out_dir, "weights.csv"))
 
   list(
     metrics = file.path(out_dir, "metrics.csv"),
-    predictions = file.path(out_dir, "predictions.csv"),
+    predictions = file.path(data_out_dir, "predictions.csv"),
     weights = file.path(out_dir, "weights.csv")
   )
 }
 
 
-.run_xgb_worker <- function(fu_dir, out_dir, python_bin = "python3",
+.run_xgb_worker <- function(fu_dir, out_dir, data_out_dir, python_bin = "python3",
                             n_trials = 50L, seed = 1L, n_cores = 1L) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  dir.create(data_out_dir, recursive = TRUE, showWarnings = FALSE)
 
   args <- c(
     file.path("training", "scripts", "run_xgb.py"),
     "--data-dir", fu_dir,
     "--out-dir", out_dir,
+    "--predictions-dir", data_out_dir,
     "--seed", as.character(seed),
     "--nthread", as.character(max(1L, as.integer(n_cores))),
     "--n-trials", as.character(as.integer(n_trials))
@@ -147,7 +148,7 @@
 
   list(
     metrics = file.path(out_dir, "metrics.csv"),
-    predictions = file.path(out_dir, "predictions.csv"),
+    predictions = file.path(data_out_dir, "predictions.csv"),
     importance = file.path(out_dir, "importance.csv"),
     tuning = file.path(out_dir, "tuning.csv"),
     model = file.path(out_dir, "model.json")
@@ -164,8 +165,12 @@
                          n_cores = 1L, python_bin = "python3",
                          xgb_n_trials = 50L) {
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+  models_dir <- file.path(output_dir, "models")
+  data_dir <- file.path(output_dir, "data")
   manifest <- list(
     output_dir = normalizePath(output_dir, mustWork = FALSE),
+    models_dir = normalizePath(models_dir, mustWork = FALSE),
+    data_dir = normalizePath(data_dir, mustWork = FALSE),
     target = "TREATMENT_GROUP",
     omics_type = omics_type,
     feature_mode = "change",
@@ -178,9 +183,9 @@
     additional_covariates = additional_covariates,
     model_covariates = model_covariates,
     reports = list(
-      cohort = file.path(output_dir, "reports", "cohort.csv"),
-      change_summary = file.path(output_dir, "reports", "change_summary.csv"),
-      preprocessing = file.path(output_dir, "reports", "preprocessing.csv")
+      cohort = file.path(models_dir, "reports", "cohort.csv"),
+      change_summary = file.path(models_dir, "reports", "change_summary.csv"),
+      preprocessing = file.path(models_dir, "reports", "preprocessing.csv")
     ),
     followups = list()
   )
@@ -195,7 +200,8 @@
 
   for (fu_level in fu_levels) {
     fu_key <- paste0("FU", fu_level)
-    fu_dir <- file.path(output_dir, fu_key)
+    fu_model_dir <- file.path(models_dir, fu_key)
+    fu_data_dir <- file.path(data_dir, fu_key)
     fu_num <- as.integer(as.character(pheno_df$FU))
     baseline_subjects <- pheno_df$SUBJECT_ID[fu_num == 0L]
     followup_subjects <- pheno_df$SUBJECT_ID[fu_num == fu_level]
@@ -230,7 +236,7 @@
       next
     }
 
-    .write_prepared_dataset(prepared, fu_dir)
+    .write_prepared_dataset(prepared, fu_data_dir)
     report_tables$cohort[[fu_key]] <- prepared$cohort
     report_tables$change_summary[[fu_key]] <- prepared$change_summary
     report_tables$preprocessing[[fu_key]] <- prepared$preprocessing
@@ -239,12 +245,13 @@
     )
 
     fu_manifest <- list(
-      data_dir = normalizePath(fu_dir, mustWork = FALSE),
+      model_dir = normalizePath(fu_model_dir, mustWork = FALSE),
+      data_dir = normalizePath(fu_data_dir, mustWork = FALSE),
       artifacts = list(
-        enet_train = file.path(fu_dir, "enet_train.csv.gz"),
-        xgb_train = file.path(fu_dir, "xgb_train.csv.gz"),
-        subjects = file.path(fu_dir, "subjects.csv"),
-        xgb_folds = file.path(fu_dir, "xgb_folds.csv")
+        enet_train = file.path(fu_data_dir, "enet_train.csv.gz"),
+        xgb_train = file.path(fu_data_dir, "xgb_train.csv.gz"),
+        subjects = file.path(fu_data_dir, "subjects.csv"),
+        xgb_folds = file.path(fu_data_dir, "xgb_folds.csv")
       ),
       models = list()
     )
@@ -253,7 +260,8 @@
       message(fu_key, ": fitting ENET.")
       fu_manifest$models$enet <- .run_enet_worker(
         prepared,
-        out_dir = file.path(fu_dir, "enet"),
+        out_dir = file.path(fu_model_dir, "enet"),
+        data_out_dir = file.path(fu_data_dir, "enet"),
         seed = seed + fu_level
       )
       message(fu_key, ": ENET complete.")
@@ -264,8 +272,9 @@
         fu_key, ": fitting XGB with ", xgb_n_trials, " Optuna trials."
       )
       fu_manifest$models$xgb <- .run_xgb_worker(
-        fu_dir = fu_dir,
-        out_dir = file.path(fu_dir, "xgb"),
+        fu_dir = fu_data_dir,
+        out_dir = file.path(fu_model_dir, "xgb"),
+        data_out_dir = file.path(fu_data_dir, "xgb"),
         python_bin = python_bin,
         n_trials = xgb_n_trials,
         seed = seed + fu_level,
@@ -277,7 +286,7 @@
     manifest$followups[[fu_key]] <- fu_manifest
   }
 
-  reports_dir <- file.path(output_dir, "reports")
+  reports_dir <- file.path(models_dir, "reports")
   dir.create(reports_dir, recursive = TRUE, showWarnings = FALSE)
   for (report_name in names(report_tables)) {
     if (length(report_tables[[report_name]]) > 0L) {

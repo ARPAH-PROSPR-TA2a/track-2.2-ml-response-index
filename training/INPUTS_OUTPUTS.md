@@ -48,52 +48,57 @@ DNAm is restricted to the reliable probe list in
 ```text
 output_dir/
   manifest.json
-  reports/
-    cohort.csv
-    change_summary.csv
-    preprocessing.csv
-  FU1/
-    enet_train.csv.gz
-    xgb_train.csv.gz
-    subjects.csv
-    xgb_folds.csv
-    enet/
-      metrics.csv
-      predictions.csv
-      weights.csv
-    xgb/
-      metrics.csv
-      predictions.csv
-      importance.csv
-      tuning.csv
-      model.json
+  models/
+    reports/
+      cohort.csv
+      change_summary.csv
+      preprocessing.csv
+    FU1/
+      enet/
+        metrics.csv
+        weights.csv
+      xgb/
+        metrics.csv
+        importance.csv
+        tuning.csv
+        model.json
+  data/
+    FU1/
+      enet_train.csv.gz
+      xgb_train.csv.gz
+      subjects.csv
+      xgb_folds.csv
+      enet/
+        predictions.csv
+      xgb/
+        predictions.csv
 ```
 
-One directory is produced per modelable follow-up. The top-level `reports/`
-directory contains stacked rows across all modelable follow-ups. There are no
+One directory is produced per modelable follow-up under both `models/` and
+`data/`. The `models/` tree contains aggregate reports and fitted model
+artifacts; `data/` contains subject-level training artifacts. There are no
 modeling strata.
 
 ### Model Matrices
 
-`enet_train.csv.gz` and `xgb_train.csv.gz` are the exact numeric matrices
-passed to each worker.
+`data/FU*/enet_train.csv.gz` and `data/FU*/xgb_train.csv.gz` are the exact
+numeric matrices passed to each worker.
 
 Column prefixes identify provenance:
 
 - `omics::<analyte>`
 - `covariate::<encoded covariate>`
 
-### `subjects.csv`
+### `data/FU*/subjects.csv`
 
 | Column | Meaning |
 |:---|:---|
 | `SUBJECT_ID` | Subject identifier |
 | `FU` | Follow-up modeled |
-| `SET` | `train` |
 | `TREATMENT_GROUP` | Outcome |
 | `ENET_FOLD_ID` | ENET CV fold |
 
-### `xgb_folds.csv`
+### `data/FU*/xgb_folds.csv`
 
 Contains the repeated XGB cross-validation assignments:
 
@@ -103,7 +108,7 @@ Contains the repeated XGB cross-validation assignments:
 | `REPEAT` | XGB CV repeat number |
 | `FOLD_ID` | Treatment-stratified fold within that repeat |
 
-### `reports/cohort.csv`
+### `models/reports/cohort.csv`
 
 Contains one row each for the eligible and training cohorts for every modelable
 follow-up. These rows contain the same subjects.
@@ -121,7 +126,7 @@ follow-up. These rows contain the same subjects.
 Eligibility requires both baseline and the modeled follow-up after input-level
 covariate filtering.
 
-### `reports/change_summary.csv`
+### `models/reports/change_summary.csv`
 
 Summarizes raw, pre-imputation omics changes by set and treatment arm:
 
@@ -139,7 +144,7 @@ omics(FU k) - omics(FU 0)
 | `N_NONMISSING` | Observed change values |
 | `MEAN`, `MEDIAN`, `SD`, `MIN`, `MAX` | Raw change-score statistics |
 
-### `reports/preprocessing.csv`
+### `models/reports/preprocessing.csv`
 
 Contains one row per candidate omics or encoded covariate feature. This file is
 both an audit table and the serialized preprocessing recipe for reconstructing
@@ -184,16 +189,15 @@ and paths to every emitted artifact.
 pooled out-of-fold AUC at that lambda. `LAMBDA_1SE` is recorded for reference
 but is not used for the final model.
 
-`enet/predictions.csv` contains:
+`data/FU*/enet/predictions.csv` contains:
 
-- `SET`
 - `SUBJECT_ID`
 - `FU`
 - `TREATMENT_GROUP`
 - `PREDICTED_PROB`
 
-`enet/weights.csv` contains the intercept, selected nonzero omics coefficients,
-and all unpenalized covariate coefficients:
+`models/FU*/enet/weights.csv` contains the intercept, selected nonzero omics
+coefficients, and all unpenalized covariate coefficients:
 
 - `FEATURE_NAME`
 - `WEIGHT`
@@ -208,7 +212,7 @@ without an R model object. The selected lambda remains in `metrics.csv`.
 in-sample AUC, median best iteration, feature count, and selected XGBoost
 parameters.
 
-`xgb/predictions.csv` uses the same schema as ENET predictions.
+`data/FU*/xgb/predictions.csv` uses the same schema as ENET predictions.
 
 `xgb/importance.csv` contains:
 
@@ -220,4 +224,4 @@ parameters.
 iterations, median best iteration, and parameters for every Optuna trial. XGB
 requires at least 10 trials; fewer than 30 produce a limited-search warning.
 
-`xgb/model.json` is the fitted XGBoost model.
+`models/FU*/xgb/model.json` is the fitted XGBoost model.

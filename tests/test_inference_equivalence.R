@@ -11,14 +11,6 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
     enet_mode = "reproduce_training"
   ))
 
-  .expect_true(
-    identical(
-      names(inference$predictions),
-      c("SET", "SUBJECT_ID", "FU", "MODEL", "TREATMENT_GROUP", "PREDICTED_PROB")
-    ),
-    "inference prediction schema"
-  )
-
   for (fu_key in names(manifest$followups)) {
     fu_manifest <- manifest$followups[[fu_key]]
     if (is.null(fu_manifest)) next
@@ -48,12 +40,13 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
         fu_manifest$models[[model_name]]$predictions,
         stringsAsFactors = FALSE
       )
-      inferred_predictions <- inference$predictions[
-        inference$predictions$FU == fu_level &
-          inference$predictions$MODEL == model_name,
-        ,
-        drop = FALSE
-      ]
+      inferred_predictions <- inference$predictions[[fu_key]][[model_name]]
+
+      .expect_equal(
+        names(inferred_predictions),
+        c("SUBJECT_ID", "FU", "TREATMENT_GROUP", "PREDICTED_PROB"),
+        paste(fu_key, model_name, "inference prediction schema")
+      )
 
       .expect_equal(
         inferred_predictions$SUBJECT_ID,

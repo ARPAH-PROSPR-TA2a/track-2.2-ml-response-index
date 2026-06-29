@@ -47,13 +47,13 @@ FAST_treatment_predict <- function(pheno,
 
   predictions <- list()
   matrices <- list()
-  pred_index <- 1L
 
   for (fu_key in followup_names) {
     fu_manifest <- manifest$followups[[fu_key]]
     if (is.null(fu_manifest)) next
 
     fu_level <- as.integer(sub("^FU", "", fu_key))
+    predictions[[fu_key]] <- list()
     matrices[[fu_key]] <- list()
 
     for (model_name in requested_models) {
@@ -76,21 +76,18 @@ FAST_treatment_predict <- function(pheno,
         .score_xgb_model(replay$matrix, model_manifest$model)
       }
 
-      predictions[[pred_index]] <- data.frame(
-        SET = "train",
+      predictions[[fu_key]][[model_name]] <- data.frame(
         SUBJECT_ID = replay$subject_ids,
         FU = fu_level,
-        MODEL = model_name,
         TREATMENT_GROUP = replay$y,
         PREDICTED_PROB = pred,
         stringsAsFactors = FALSE
       )
-      pred_index <- pred_index + 1L
     }
   }
 
   list(
-    predictions = do.call(rbind, predictions),
+    predictions = predictions,
     matrices = matrices,
     manifest = manifest
   )

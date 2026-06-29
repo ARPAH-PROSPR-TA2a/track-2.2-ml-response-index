@@ -60,6 +60,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--predictions-dir", required=True)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--nthread", type=int, default=1)
     parser.add_argument("--n-trials", type=int, default=50)
@@ -76,12 +77,14 @@ def main():
 
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
+    predictions_dir = Path(args.predictions_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    predictions_dir.mkdir(parents=True, exist_ok=True)
 
     x_train_df = pd.read_csv(data_dir / "xgb_train.csv.gz")
     subjects = pd.read_csv(data_dir / "subjects.csv")
     xgb_folds_df = pd.read_csv(data_dir / "xgb_folds.csv")
-    y_train_df = subjects[subjects["SET"] == "train"].reset_index(drop=True)
+    y_train_df = subjects.reset_index(drop=True)
 
     x_train = x_train_df.to_numpy(dtype=float)
     y_train = y_train_df["TREATMENT_GROUP"].to_numpy(dtype=int)
@@ -193,14 +196,13 @@ def main():
 
     predictions = pd.DataFrame(
         {
-            "SET": "train",
             "SUBJECT_ID": y_train_df["SUBJECT_ID"],
             "FU": y_train_df["FU"],
             "TREATMENT_GROUP": y_train,
             "PREDICTED_PROB": train_pred,
         }
     )
-    predictions.to_csv(out_dir / "predictions.csv", index=False)
+    predictions.to_csv(predictions_dir / "predictions.csv", index=False)
 
     importance = model.get_score(importance_type="gain")
     importance_df = pd.DataFrame(

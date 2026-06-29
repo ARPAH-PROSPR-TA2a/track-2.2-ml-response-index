@@ -44,7 +44,7 @@ FAST_treatment_ML()
 │   ├── write model-ready inputs
 │   ├── fit requested models
 │   └── collect report rows
-├── write reports/
+├── write models/reports/
 ├── write manifest.json
 └── return manifest
 ```
@@ -377,7 +377,7 @@ value but is not used to fit the final model.
 
 - `metrics.csv`: pooled out-of-fold, test, and in-sample AUC; selected
   `lambda.min`; `lambda.1se`; alpha; feature counts.
-- `predictions.csv`: train and test probabilities with subject IDs and labels.
+- `predictions.csv`: training-subject probabilities with subject IDs and labels.
 - `weights.csv`: intercept, nonzero omics coefficients, and every unpenalized
   covariate coefficient.
 
@@ -394,8 +394,9 @@ R launches the worker with:
 
 ```text
 <python_bin> training/scripts/run_xgb.py
-  --data-dir <FU directory>
-  --out-dir <FU directory>/xgb
+  --data-dir <data/FU directory>
+  --out-dir <models/FU directory>/xgb
+  --predictions-dir <data/FU directory>/xgb
   --seed <seed + FU>
   --nthread <n_cores>
   --n-trials <xgb_n_trials>
@@ -447,7 +448,7 @@ produce a warning because the search is limited.
 
 - `metrics.csv`: mean and SD repeated-CV AUC, repeat count, test and in-sample
   AUC, median best iteration, feature count, and selected parameters.
-- `predictions.csv`: train and test probabilities.
+- `predictions.csv`: training-subject probabilities.
 - `importance.csv`: gain importance and feature type.
 - `tuning.csv`: trial-level mean and SD AUC, per-repeat AUC and best iteration,
   median best iteration, and parameter values.
@@ -462,36 +463,42 @@ the Python traceback remains visible in the console.
 
 The pipeline writes exact model inputs before fitting either model. It also
 accumulates per-follow-up report rows during preparation and writes one
-top-level `reports/` directory after all modelable follow-ups finish.
+`models/reports/` directory after all modelable follow-ups finish.
 
 ```text
 output_dir/
   manifest.json
-  reports/
-    cohort.csv
-    change_summary.csv
-    preprocessing.csv
-  FU1/
-    enet_train.csv.gz
-    xgb_train.csv.gz
-    subjects.csv
-    xgb_folds.csv
-    enet/
-      metrics.csv
-      predictions.csv
-      weights.csv
-    xgb/
-      metrics.csv
-      predictions.csv
-      importance.csv
-      tuning.csv
-      model.json
+  models/
+    reports/
+      cohort.csv
+      change_summary.csv
+      preprocessing.csv
+    FU1/
+      enet/
+        metrics.csv
+        weights.csv
+      xgb/
+        metrics.csv
+        importance.csv
+        tuning.csv
+        model.json
+  data/
+    FU1/
+      enet_train.csv.gz
+      xgb_train.csv.gz
+      subjects.csv
+      xgb_folds.csv
+      enet/
+        predictions.csv
+      xgb/
+        predictions.csv
 ```
 
-The `FU*` structure repeats for every modelable nonzero follow-up. The
-top-level `reports/` files stack rows across all modelable follow-ups.
+The `FU*` structure repeats under both `models/` and `data/` for every
+modelable nonzero follow-up. The `models/reports/` files stack rows across all
+modelable follow-ups.
 
-### `subjects.csv`
+### `data/FU*/subjects.csv`
 
 This is the shared row map for model matrices:
 
@@ -499,11 +506,10 @@ This is the shared row map for model matrices:
 |:---|:---|
 | `SUBJECT_ID` | Subject represented by the matrix row |
 | `FU` | Follow-up modeled |
-| `SET` | `train` |
 | `TREATMENT_GROUP` | Binary prediction target |
 | `ENET_FOLD_ID` | ENET CV fold |
 
-### `xgb_folds.csv`
+### `data/FU*/xgb_folds.csv`
 
 This file preserves every repeated XGB fold assignment:
 
@@ -513,7 +519,7 @@ This file preserves every repeated XGB fold assignment:
 | `REPEAT` | Repeat number |
 | `FOLD_ID` | Fold within the repeat |
 
-### `reports/cohort.csv`
+### `models/reports/cohort.csv`
 
 For each modeled follow-up, this file records subject, treatment-arm, and sex
 counts for:
@@ -521,13 +527,13 @@ counts for:
 - `eligible`: subjects with baseline and the follow-up;
 - `train`: subjects assigned to model training.
 
-### `reports/change_summary.csv`
+### `models/reports/change_summary.csv`
 
-This file summarizes the raw, pre-imputation change matrix by `eligible`,
-`train`, and `test` set and by treatment arm. Each analyte row records subject
+This file summarizes the raw, pre-imputation change matrix by `eligible` and
+`train` set and by treatment arm. Each analyte row records subject
 count, nonmissing count, mean, median, SD, minimum, and maximum.
 
-### `reports/preprocessing.csv`
+### `models/reports/preprocessing.csv`
 
 This is the stacked preprocessing audit described above. The `FU` column
 identifies the follow-up that produced each feature row.

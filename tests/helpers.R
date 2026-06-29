@@ -155,13 +155,12 @@
   .expect_true(
     identical(
       names(predictions),
-      c("SET", "SUBJECT_ID", "FU", "TREATMENT_GROUP", "PREDICTED_PROB")
+      c("SUBJECT_ID", "FU", "TREATMENT_GROUP", "PREDICTED_PROB")
     ),
     paste(basename(dirname(path)), "prediction schema")
   )
   .expect_true(
-    nrow(predictions) == expected_subjects &&
-      identical(unique(predictions$SET), "train"),
+    nrow(predictions) == expected_subjects,
     paste(basename(dirname(path)), "prediction rows")
   )
   .expect_true(
