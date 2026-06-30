@@ -14,7 +14,19 @@
   if (!requireNamespace("jsonlite", quietly = TRUE)) {
     stop("Package 'jsonlite' is required to write ML run config files.")
   }
-  jsonlite::write_json(x, path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  jsonlite::write_json(
+    x,
+    path,
+    auto_unbox = TRUE,
+    pretty = TRUE,
+    null = "null",
+    digits = NA
+  )
+}
+
+
+.success_auc_threshold <- function() {
+  0.8
 }
 
 
@@ -301,4 +313,162 @@
   .write_json_simple(manifest, manifest_path)
   manifest$manifest_path <- manifest_path
   manifest
+}
+
+
+.export_manifest_object <- function(manifest) {
+  if (is.character(manifest) && length(manifest) == 1L) {
+    if (!requireNamespace("jsonlite", quietly = TRUE)) {
+      stop("Package 'jsonlite' is required to read manifest files.")
+    }
+    out <- jsonlite::fromJSON(manifest, simplifyVector = FALSE)
+    out$manifest_path <- manifest
+    return(out)
+  }
+  if (!is.list(manifest)) {
+    stop("manifest must be a manifest list or path to manifest.json.")
+  }
+  manifest
+}
+
+
+.export_vector <- function(x) {
+  if (is.null(x)) {
+    return(character(0))
+  }
+  as.character(unlist(x, use.names = FALSE))
+}
+
+
+.export_model_id <- function(manifest, fu_key, model_name) {
+  run_id <- basename(normalizePath(manifest$output_dir, mustWork = FALSE))
+  raw_id <- paste(run_id, manifest$omics_type, fu_key, model_name, sep = "_")
+  gsub("[^A-Za-z0-9_.-]+", "_", raw_id)
+}
+
+
+.model_package_path <- function(output_dir, model_id) {
+  file.path(output_dir, paste0(model_id, ".json"))
+}
+
+
+.build_exported_model_package <- function(manifest, fu_key, model_name,
+                                          model_manifest, preprocessing) {
+  fu_level <- as.integer(sub("^FU", "", fu_key))
+  flag <- paste0("IN_", toupper(model_name))
+  metrics <- read.csv(model_manifest$metrics, stringsAsFactors = FALSE)
+  if (!"CV_AUC" %in% names(metrics) || nrow(metrics) != 1L) {
+    stop(fu_key, " ", model_name, ": metrics.csv must contain exactly one CV_AUC value.")
+  }
+
+  model_preprocessing <- preprocessing[
+    preprocessing$FU == fu_level &
+      preprocessing$STATUS == "retained" &
+      preprocessing[[flag]],
+    ,
+    drop = FALSE
+  ]
+  row.names(model_preprocessing) <- NULL
+
+  package <- list(
+    schema_version = "1.0",
+    model_id = .export_model_id(manifest, fu_key, model_name),
+    family = model_name,
+    fu = fu_level,
+    target = manifest$target,
+    omics_type = manifest$omics_type,
+    feature_mode = manifest$feature_mode,
+    training_cv_auc = as.numeric(metrics$CV_AUC),
+    success_auc_threshold = .success_auc_threshold(),
+    successful = is.finite(as.numeric(metrics$CV_AUC)) &&
+      as.numeric(metrics$CV_AUC) >= .success_auc_threshold(),
+    source = list(
+      output_dir = manifest$output_dir,
+      manifest_path = if (is.null(manifest$manifest_path)) NA_character_ else manifest$manifest_path
+    ),
+    covariates = list(
+      additional_covariates = .export_vector(manifest$additional_covariates),
+      model_covariates = .export_vector(manifest$model_covariates)
+    ),
+    training_metrics = metrics,
+    preprocessing = model_preprocessing
+  )
+
+  if (model_name == "enet") {
+    package$weights <- read.csv(model_manifest$weights, stringsAsFactors = FALSE)
+  } else if (model_name == "xgb") {
+    package$xgb_model_json <- paste(readLines(model_manifest$model, warn = FALSE), collapse = "\n")
+  } else {
+    stop("Unsupported model family: ", model_name)
+  }
+
+  package
+}
+
+
+FAST_export_models <- function(manifest,
+                               output_dir = NULL) {
+  manifest <- .export_manifest_object(manifest)
+  if (is.null(output_dir)) {
+    output_dir <- file.path(manifest$models_dir, "exported_models")
+  }
+  dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+  preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
+  exports <- list()
+  export_index <- 1L
+
+  for (fu_key in names(manifest$followups)) {
+    fu_manifest <- manifest$followups[[fu_key]]
+    if (is.null(fu_manifest)) next
+
+    for (model_name in names(fu_manifest$models)) {
+      model_manifest <- fu_manifest$models[[model_name]]
+      package <- .build_exported_model_package(
+        manifest = manifest,
+        fu_key = fu_key,
+        model_name = model_name,
+        model_manifest = model_manifest,
+        preprocessing = preprocessing
+      )
+      path <- .model_package_path(output_dir, package$model_id)
+      .write_json_simple(package, path)
+
+      exports[[export_index]] <- data.frame(
+        MODEL_ID = package$model_id,
+        FU = package$fu,
+        MODEL = package$family,
+        TRAINING_CV_AUC = package$training_cv_auc,
+        SUCCESS_AUC_THRESHOLD = package$success_auc_threshold,
+        SUCCESSFUL = package$successful,
+        PATH = path,
+        stringsAsFactors = FALSE
+      )
+      export_index <- export_index + 1L
+    }
+  }
+
+  exported <- if (length(exports) > 0L) {
+    do.call(rbind, exports)
+  } else {
+    data.frame(
+      MODEL_ID = character(0),
+      FU = integer(0),
+      MODEL = character(0),
+      TRAINING_CV_AUC = numeric(0),
+      SUCCESS_AUC_THRESHOLD = numeric(0),
+      SUCCESSFUL = logical(0),
+      PATH = character(0),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  manifest_path <- file.path(output_dir, "exported_models.csv")
+  .write_csv(exported, manifest_path)
+
+  list(
+    models = exported,
+    output_dir = normalizePath(output_dir, mustWork = FALSE),
+    manifest = manifest_path
+  )
 }

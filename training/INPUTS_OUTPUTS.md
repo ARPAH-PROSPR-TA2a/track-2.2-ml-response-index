@@ -225,3 +225,48 @@ iterations, median best iteration, and parameters for every Optuna trial. XGB
 requires at least 10 trials; fewer than 30 produce a limited-search warning.
 
 `models/FU*/xgb/model.json` is the fitted XGBoost model.
+
+## Exported Model Packages
+
+`FAST_export_models()` writes one JSON package for each fitted model. Each
+package is self-contained and can be evaluated without the training manifest.
+Models with `CV_AUC >= 0.8` have `successful = true`; lower-AUC models are still
+exported with `successful = false`.
+
+Default export location:
+
+```text
+output_dir/
+  models/
+    exported_models/
+      exported_models.csv
+      <model_id>.json
+```
+
+`exported_models.csv` contains:
+
+- `MODEL_ID`
+- `FU`
+- `MODEL`
+- `TRAINING_CV_AUC`
+- `SUCCESS_AUC_THRESHOLD`
+- `SUCCESSFUL`
+- `PATH`
+
+Common fields include:
+
+- `schema_version`
+- `model_id`
+- `family`
+- `fu`
+- `target`
+- `omics_type`
+- `training_cv_auc`
+- `success_auc_threshold`
+- `successful`
+- `covariates`
+- `training_metrics`
+- `preprocessing`
+
+ENET packages additionally contain `weights`. XGB packages additionally contain
+`xgb_model_json`.

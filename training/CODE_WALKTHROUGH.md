@@ -4,8 +4,10 @@ This walkthrough documents the current Track 2.2 implementation. The pipeline
 predicts randomized treatment assignment from baseline-to-follow-up omics
 changes. Its modeling target is `TREATMENT_GROUP`.
 
-The public function is `FAST_treatment_ML()`: it prepares model-ready datasets,
-fits ENET and/or XGB, writes all artifacts to disk, and returns a manifest.
+The main training function is `FAST_treatment_ML()`: it prepares model-ready
+datasets, fits ENET and/or XGB, writes training artifacts to disk, and returns a
+manifest. `FAST_export_models()` then packages each fitted model into a
+self-contained JSON file for cross-trial evaluation.
 
 ## Table of Contents
 
@@ -19,17 +21,18 @@ fits ENET and/or XGB, writes all artifacts to disk, and returns a manifest.
 8. [Step 6: Fit ENET](#step-6-fit-enet)
 9. [Step 7: Fit XGB](#step-7-fit-xgb)
 10. [Step 8: Write Outputs, Reports, and Manifest](#step-8-write-outputs-reports-and-manifest)
+11. [Step 9: Export Model Packages](#step-9-export-model-packages)
 
 ---
 
 ## Overview
 
-`FAST_treatment_ML()` is the single public entry point for the Track 2.2 ML
-pipeline. It takes phenotype and omics data, validates and aligns them, creates
-one modeling dataset per nonzero follow-up, converts each dataset into
+`FAST_treatment_ML()` takes phenotype and omics data, validates and aligns them,
+creates one modeling dataset per nonzero follow-up, converts each dataset into
 baseline-to-follow-up change features, preprocesses features using training-only
 parameters, fits ENET and/or XGB, writes model artifacts plus reports, and
-returns a manifest.
+returns a manifest. `FAST_export_models()` consumes that manifest and writes one
+self-contained JSON package per fitted model.
 
 ```text
 FAST_treatment_ML()
@@ -47,6 +50,12 @@ FAST_treatment_ML()
 ├── write models/reports/
 ├── write manifest.json
 └── return manifest
+
+FAST_export_models()
+├── read manifest and model metrics
+├── mark each fitted model successful when CV_AUC >= 0.8
+├── embed model-specific preprocessing and scoring artifacts
+└── write models/exported_models/
 ```
 
 Each section below follows that execution order. The complete external input
@@ -95,6 +104,19 @@ FAST_treatment_ML <- function(
 Argument validation happens before the pipeline touches data. `.validate_ml_args()`
 checks model names, fold counts, XGB repeat count, seed, runtime settings, and
 XGB trial count.
+
+File: `R/write_training_artifacts.R`
+
+```r
+FAST_export_models <- function(
+  manifest,
+  output_dir = NULL
+)
+```
+
+`manifest` can be the list returned by `FAST_treatment_ML()` or a path to
+`manifest.json`. `output_dir = NULL` writes to
+`manifest$models_dir/exported_models`.
 
 ## Step 1: Validate and Prepare Inputs
 
@@ -496,7 +518,8 @@ output_dir/
 
 The `FU*` structure repeats under both `models/` and `data/` for every
 modelable nonzero follow-up. The `models/reports/` files stack rows across all
-modelable follow-ups.
+modelable follow-ups. `models/exported_models/` appears only after
+`FAST_export_models()` is called.
 
 ### `data/FU*/subjects.csv`
 
@@ -548,3 +571,28 @@ Follow-ups that cannot produce a valid prepared dataset are stored as `NULL` in
 the in-memory manifest.
 
 ---
+
+## Step 9: Export Model Packages
+
+`FAST_export_models()` writes one JSON package per fitted `(FU, model)` under:
+
+```text
+output_dir/
+  models/
+    exported_models/
+      exported_models.csv
+      <model_id>.json
+```
+
+Each package is self-contained for evaluation. It embeds:
+
+- run metadata, target, omics type, follow-up, and model family;
+- training metrics, including `CV_AUC`;
+- `success_auc_threshold = 0.8`;
+- `successful`, computed as `CV_AUC >= 0.8`;
+- model-specific retained preprocessing rows in matrix order;
+- ENET weights or embedded XGBoost model JSON;
+- covariate metadata needed to rebuild the model matrix.
+
+`exported_models.csv` indexes every package and records `MODEL_ID`, `FU`,
+`MODEL`, `TRAINING_CV_AUC`, `SUCCESS_AUC_THRESHOLD`, `SUCCESSFUL`, and `PATH`.

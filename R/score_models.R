@@ -1,5 +1,4 @@
-.score_enet_weights <- function(x, weights_path) {
-  weights <- read.csv(weights_path, stringsAsFactors = FALSE)
+.score_enet_weight_table <- function(x, weights) {
   intercept <- weights$WEIGHT[weights$FEATURE_NAME == "(Intercept)"]
   if (length(intercept) != 1L) {
     stop("ENET weights must contain exactly one intercept row.")
@@ -21,6 +20,12 @@
 }
 
 
+.score_enet_weights <- function(x, weights_path) {
+  weights <- read.csv(weights_path, stringsAsFactors = FALSE)
+  .score_enet_weight_table(x, weights)
+}
+
+
 .score_xgb_model <- function(x, model_path) {
   if (!requireNamespace("xgboost", quietly = TRUE)) {
     stop("Package 'xgboost' is required for XGB inference.")
@@ -32,7 +37,15 @@
 }
 
 
-.catalog_auc_threshold <- function() {
+.score_xgb_model_json <- function(x, model_json) {
+  model_path <- tempfile(fileext = ".json")
+  on.exit(unlink(model_path), add = TRUE)
+  writeLines(model_json, model_path, useBytes = TRUE)
+  .score_xgb_model(x, model_path)
+}
+
+
+.success_auc_threshold <- function() {
   0.8
 }
 
@@ -47,8 +60,8 @@
 
 
 .validation_row <- function(fu_level, model_name, predictions, training_cv_auc) {
-  cataloged <- is.finite(training_cv_auc) &&
-    training_cv_auc >= .catalog_auc_threshold()
+  successful <- is.finite(training_cv_auc) &&
+    training_cv_auc >= .success_auc_threshold()
 
   y <- as.integer(predictions$TREATMENT_GROUP)
   n_control <- sum(y == 0L)
@@ -59,7 +72,7 @@
   logit_or <- NA_real_
   logit_p <- NA_real_
 
-  if (cataloged && n_control > 0L && n_treatment > 0L) {
+  if (successful && n_control > 0L && n_treatment > 0L) {
     auc <- .safe_auc(y, predictions$PREDICTED_PROB)
     fit <- stats::glm(
       TREATMENT_GROUP ~ PREDICTED_PROB,
@@ -78,8 +91,8 @@
     FU = fu_level,
     MODEL = model_name,
     TRAINING_CV_AUC = training_cv_auc,
-    CATALOG_AUC_THRESHOLD = .catalog_auc_threshold(),
-    CATALOGED = cataloged,
+    SUCCESS_AUC_THRESHOLD = .success_auc_threshold(),
+    SUCCESSFUL = successful,
     N = nrow(predictions),
     N_CONTROL = n_control,
     N_TREATMENT = n_treatment,

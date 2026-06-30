@@ -6,6 +6,7 @@ randomized trial datasets. The target is `TREATMENT_GROUP`.
 The training pipeline exposes:
 
 - `FAST_treatment_ML()` for model fitting and ML-specific reports.
+- `FAST_export_models()` for self-contained JSON model packages.
 
 ## Quick Example
 
@@ -30,6 +31,8 @@ manifest <- FAST_treatment_ML(
 )
 
 read.csv("runs/trial_a_treatment_ml/models/FU1/enet/metrics.csv")
+
+exported <- FAST_export_models(manifest)
 ```
 
 ## Modeling
@@ -67,6 +70,11 @@ The Python environment must have `numpy`, `pandas`, `scikit-learn`,
 `xgboost`, and `optuna` installed.
 
 ## Models
+
+Models with `CV_AUC >= 0.8` are marked successful for cross-trial validation.
+`FAST_export_models()` writes one self-contained JSON package per fitted model
+under `models/exported_models/`; each package records whether it passed the
+success threshold.
 
 ### ENET
 
@@ -135,6 +143,20 @@ Reports under `models/reports/` stack information across follow-ups:
 change scores, and `preprocessing.csv` audits feature transformations and
 removals while recording the preprocessing recipe needed to reconstruct model
 matrices. Run settings and artifact paths are stored once in `manifest.json`.
+
+Exported model JSON packages contain the model-specific preprocessing recipe,
+training metrics, covariates, a `successful` flag, and either ENET weights or
+embedded XGBoost model JSON. They are the preferred input for single-model
+cross-trial evaluation. They are written only after `FAST_export_models()` is
+called:
+
+```text
+output_dir/
+  models/
+    exported_models/
+      exported_models.csv
+      <model_id>.json
+```
 
 See [INPUTS_OUTPUTS.md](INPUTS_OUTPUTS.md) for schemas.
 
