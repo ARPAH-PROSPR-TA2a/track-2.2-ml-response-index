@@ -366,33 +366,27 @@ run_feature_tests <- function() {
     "all-missing preprocessing rows have no learned parameters"
   )
   .expect_equal(
-    prepared$cohort$SET,
-    c("eligible", "train"),
-    "cohort report contains eligible and train rows"
-  )
-  .expect_equal(
     prepared$cohort$N_SUBJECTS,
-    c(8L, 8L),
-    "cohort report counts aligned subjects by set"
+    8L,
+    "cohort report counts aligned subjects"
   )
   .expect_equal(
     prepared$cohort[, c("N_CONTROL", "N_TREATMENT", "N_MALE", "N_FEMALE")],
     data.frame(
-      N_CONTROL = c(4L, 4L),
-      N_TREATMENT = c(4L, 4L),
-      N_MALE = c(4L, 4L),
-      N_FEMALE = c(4L, 4L)
+      N_CONTROL = 4L,
+      N_TREATMENT = 4L,
+      N_MALE = 4L,
+      N_FEMALE = 4L
     ),
-    "cohort report counts treatment and sex by set"
+    "cohort report counts treatment and sex"
   )
 
-  train_control_feature <- prepared$change_summary[
-    prepared$change_summary$SET == "train" &
-      prepared$change_summary$TREATMENT_GROUP == 0L &
+  control_feature <- prepared$change_summary[
+    prepared$change_summary$TREATMENT_GROUP == 0L &
       prepared$change_summary$ANALYTE_NAME == "feature_change",
   ]
   .expect_equal(
-    train_control_feature[, c("N_SUBJECTS", "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX")],
+    control_feature[, c("N_SUBJECTS", "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX")],
     data.frame(
       N_SUBJECTS = 4L,
       N_NONMISSING = 4L,
@@ -406,12 +400,11 @@ run_feature_tests <- function() {
   )
   .expect_true(
     {
-      all_missing_train_rows <- prepared$change_summary[
-        prepared$change_summary$SET == "train" &
-          prepared$change_summary$ANALYTE_NAME == "all_missing_training",
+      all_missing_rows <- prepared$change_summary[
+        prepared$change_summary$ANALYTE_NAME == "all_missing_training",
       ]
-      all(all_missing_train_rows$N_NONMISSING == 0L) &&
-        all(is.na(all_missing_train_rows$MEAN))
+      all(all_missing_rows$N_NONMISSING == 0L) &&
+        all(is.na(all_missing_rows$MEAN))
     },
     "change summary preserves raw missingness"
   )
@@ -547,30 +540,27 @@ run_end_to_end_tests <- function() {
     identical(
       names(cohort),
       c(
-        "FU", "SET", "N_SUBJECTS", "N_CONTROL", "N_TREATMENT",
+        "FU", "N_SUBJECTS", "N_CONTROL", "N_TREATMENT",
         "N_MALE", "N_FEMALE"
       )
     ) &&
       identical(sort(unique(cohort$FU)), 1:2) &&
-      all(table(cohort$FU) == 2L) &&
-      all(c("eligible", "train") %in% cohort$SET) &&
-      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "eligible"] == nrow(subjects) &&
-      cohort$N_SUBJECTS[cohort$FU == 1L & cohort$SET == "train"] == nrow(subjects),
-    "cohort artifact stacks eligible and train subjects across follow-ups"
+      all(table(cohort$FU) == 1L) &&
+      cohort$N_SUBJECTS[cohort$FU == 1L] == nrow(subjects),
+    "cohort artifact stacks one row per follow-up"
   )
   .expect_true(
     identical(
       names(change_summary),
       c(
-        "FU", "SET", "TREATMENT_GROUP", "ANALYTE_NAME", "N_SUBJECTS",
+        "FU", "TREATMENT_GROUP", "ANALYTE_NAME", "N_SUBJECTS",
         "N_NONMISSING", "MEAN", "MEDIAN", "SD", "MIN", "MAX"
       )
     ) &&
       identical(sort(unique(change_summary$FU)), 1:2) &&
-      all(c("eligible", "train") %in% change_summary$SET) &&
       all(0:1 %in% change_summary$TREATMENT_GROUP) &&
       all(change_summary$ANALYTE_NAME %in% fixture$omics$ANALYTE_NAME),
-    "change summary artifact stacks raw changes by set and treatment"
+    "change summary artifact stacks raw changes by treatment"
   )
   .expect_true(
     identical(

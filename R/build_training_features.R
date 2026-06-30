@@ -148,28 +148,17 @@
 
 
 .make_cohort_report <- function(pheno_followup) {
-  sets <- list(
-    eligible = seq_len(nrow(pheno_followup)),
-    train = seq_len(nrow(pheno_followup))
+  treatment <- .as_binary_numeric(pheno_followup$TREATMENT_GROUP)
+  female <- .as_binary_numeric(pheno_followup$FEMALE)
+  data.frame(
+    FU = as.integer(as.character(pheno_followup$FU[1])),
+    N_SUBJECTS = nrow(pheno_followup),
+    N_CONTROL = sum(treatment == 0L),
+    N_TREATMENT = sum(treatment == 1L),
+    N_MALE = sum(female == 0L),
+    N_FEMALE = sum(female == 1L),
+    stringsAsFactors = FALSE
   )
-
-  rows <- lapply(names(sets), function(set_name) {
-    cell <- pheno_followup[sets[[set_name]], , drop = FALSE]
-    treatment <- .as_binary_numeric(cell$TREATMENT_GROUP)
-    female <- .as_binary_numeric(cell$FEMALE)
-    data.frame(
-      FU = as.integer(as.character(cell$FU[1])),
-      SET = set_name,
-      N_SUBJECTS = nrow(cell),
-      N_CONTROL = sum(treatment == 0L),
-      N_TREATMENT = sum(treatment == 1L),
-      N_MALE = sum(female == 0L),
-      N_FEMALE = sum(female == 1L),
-      stringsAsFactors = FALSE
-    )
-  })
-
-  do.call(rbind, rows)
 }
 
 
@@ -198,40 +187,31 @@
 
 
 .make_change_summary <- function(change_matrix, y, fu_level) {
-  sets <- list(
-    eligible = seq_len(nrow(change_matrix)),
-    train = seq_len(nrow(change_matrix))
-  )
-
   rows <- list()
   row_index <- 1L
-  for (set_name in names(sets)) {
-    set_idx <- sets[[set_name]]
-    for (treatment_group in 0:1) {
-      group_idx <- set_idx[y[set_idx] == treatment_group]
-      if (length(group_idx) == 0L) next
+  for (treatment_group in 0:1) {
+    group_idx <- which(y == treatment_group)
+    if (length(group_idx) == 0L) next
 
-      summaries <- t(apply(
-        change_matrix[group_idx, , drop = FALSE],
-        2,
-        .summarize_change_values
-      ))
-      rows[[row_index]] <- data.frame(
-        FU = fu_level,
-        SET = set_name,
-        TREATMENT_GROUP = treatment_group,
-        ANALYTE_NAME = colnames(change_matrix),
-        N_SUBJECTS = length(group_idx),
-        N_NONMISSING = as.integer(summaries[, "N_NONMISSING"]),
-        MEAN = summaries[, "MEAN"],
-        MEDIAN = summaries[, "MEDIAN"],
-        SD = summaries[, "SD"],
-        MIN = summaries[, "MIN"],
-        MAX = summaries[, "MAX"],
-        stringsAsFactors = FALSE
-      )
-      row_index <- row_index + 1L
-    }
+    summaries <- t(apply(
+      change_matrix[group_idx, , drop = FALSE],
+      2,
+      .summarize_change_values
+    ))
+    rows[[row_index]] <- data.frame(
+      FU = fu_level,
+      TREATMENT_GROUP = treatment_group,
+      ANALYTE_NAME = colnames(change_matrix),
+      N_SUBJECTS = length(group_idx),
+      N_NONMISSING = as.integer(summaries[, "N_NONMISSING"]),
+      MEAN = summaries[, "MEAN"],
+      MEDIAN = summaries[, "MEDIAN"],
+      SD = summaries[, "SD"],
+      MIN = summaries[, "MIN"],
+      MAX = summaries[, "MAX"],
+      stringsAsFactors = FALSE
+    )
+    row_index <- row_index + 1L
   }
 
   do.call(rbind, rows)

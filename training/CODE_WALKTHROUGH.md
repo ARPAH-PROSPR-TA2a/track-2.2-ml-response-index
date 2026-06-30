@@ -545,16 +545,13 @@ This file preserves every repeated XGB fold assignment:
 ### `models/reports/cohort.csv`
 
 For each modeled follow-up, this file records subject, treatment-arm, and sex
-counts for:
-
-- `eligible`: subjects with baseline and the follow-up;
-- `train`: subjects assigned to model training.
+counts for the modeled cohort.
 
 ### `models/reports/change_summary.csv`
 
-This file summarizes the raw, pre-imputation change matrix by `eligible` and
-`train` set and by treatment arm. Each analyte row records subject
-count, nonmissing count, mean, median, SD, minimum, and maximum.
+This file summarizes the raw, pre-imputation change matrix by treatment arm.
+Each analyte row records subject count, nonmissing count, mean, median, SD,
+minimum, and maximum.
 
 ### `models/reports/preprocessing.csv`
 

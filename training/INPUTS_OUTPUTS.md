@@ -76,8 +76,7 @@ output_dir/
 
 One directory is produced per modelable follow-up under both `models/` and
 `data/`. The `models/` tree contains aggregate reports and fitted model
-artifacts; `data/` contains subject-level training artifacts. There are no
-modeling strata.
+artifacts; `data/` contains subject-level training artifacts.
 
 ### Model Matrices
 
@@ -110,13 +109,11 @@ Contains the repeated XGB cross-validation assignments:
 
 ### `models/reports/cohort.csv`
 
-Contains one row each for the eligible and training cohorts for every modelable
-follow-up. These rows contain the same subjects.
+Contains one row for every modelable follow-up.
 
 | Column | Meaning |
 |:---|:---|
 | `FU` | Follow-up modeled |
-| `SET` | `eligible` or `train` |
 | `N_SUBJECTS` | Number of subjects |
 | `N_CONTROL` | Control-arm subjects |
 | `N_TREATMENT` | Treatment-arm subjects |
@@ -128,7 +125,7 @@ covariate filtering.
 
 ### `models/reports/change_summary.csv`
 
-Summarizes raw, pre-imputation omics changes by set and treatment arm:
+Summarizes raw, pre-imputation omics changes by treatment arm:
 
 ```text
 omics(FU k) - omics(FU 0)
@@ -137,10 +134,9 @@ omics(FU k) - omics(FU 0)
 | Column | Meaning |
 |:---|:---|
 | `FU` | Follow-up modeled |
-| `SET` | `eligible` or `train` |
 | `TREATMENT_GROUP` | `0` or `1` |
 | `ANALYTE_NAME` | Omics feature |
-| `N_SUBJECTS` | Subjects in the set and treatment arm |
+| `N_SUBJECTS` | Subjects in the treatment arm |
 | `N_NONMISSING` | Observed change values |
 | `MEAN`, `MEDIAN`, `SD`, `MIN`, `MAX` | Raw change-score statistics |
 
