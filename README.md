@@ -49,8 +49,10 @@ bulk <- FAST_bulk_evaluate(
 
 - [Training README](training/README.md)
 - [Inference README](inference/README.md)
-- [Input and output schemas](training/INPUTS_OUTPUTS.md)
-- [Code walkthrough](training/CODE_WALKTHROUGH.md)
+- [Training input and output schemas](training/INPUTS_OUTPUTS.md)
+- [Training code walkthrough](training/CODE_WALKTHROUGH.md)
+- [Inference input and output schemas](inference/INPUTS_OUTPUTS.md)
+- [Inference code walkthrough](inference/CODE_WALKTHROUGH.md)
 
 ## Tests
 
