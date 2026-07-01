@@ -1,3 +1,8 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
 # FAST Treatment ML: Inputs and Outputs
 
 ## Inputs
