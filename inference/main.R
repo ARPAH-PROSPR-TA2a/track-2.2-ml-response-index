@@ -116,7 +116,7 @@ FAST_treatment_predict <- function(pheno,
     pheno = pheno,
     omics = omics,
     omics_type = omics_type,
-    additional_covariates = additional_covariates
+    additional_covariates = NULL
   )
   preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
 
@@ -223,7 +223,7 @@ FAST_evaluate <- function(pheno,
     pheno = pheno,
     omics = omics,
     omics_type = model_package$omics_type,
-    additional_covariates = additional_covariates
+    additional_covariates = NULL
   )
 
   preprocessing <- as.data.frame(model_package$preprocessing, stringsAsFactors = FALSE)

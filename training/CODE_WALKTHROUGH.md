@@ -90,7 +90,7 @@ FAST_treatment_ML <- function(
 | `pheno` | Required | Sample-level phenotype and treatment data. |
 | `omics` | Required | Analyte-by-sample numeric measurements. |
 | `omics_type` | `"Proteomics"` | Selects `"Proteomics"`, `"Metabolomics"`, or `"DNAm"` handling. It does not transform input values. |
-| `additional_covariates` | `NULL` | Optional phenotype columns used as ENET model covariates. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during validation. |
+| `additional_covariates` | `NULL` | Optional numeric phenotype columns used as training-only ENET adjustment covariates. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during training validation. |
 | `models` | `c("enet", "xgb")` | Selects one or both model workers. |
 | `output_dir` | `NULL` | Selects the artifact directory; `NULL` creates a timestamped directory under `runs/`. |
 | `enet_cv_folds` | `10L` | Requests the ENET fold count. |
@@ -145,8 +145,9 @@ Input preparation is handled by `.prepare_inputs()`.
 | `TREATMENT_GROUP` | Binary `0/1`; both arms must be present |
 | `FEMALE` | Binary `0/1` |
 
-Variables named in `additional_covariates` must exist and be numeric, factor,
-or logical.
+Variables named in `additional_covariates` must exist and be numeric.
+Categorical covariates must be one-hot encoded upstream and passed as numeric
+indicator columns.
 
 ### Omics Data
 
@@ -307,14 +308,16 @@ records:
 | `SCALE` | Training standard deviation |
 | `IN_ENET` | Whether ENET receives the feature |
 | `IN_XGB` | Whether XGB receives the feature |
+| `DEPLOYABLE` | Whether inference uses the feature on future datasets |
 
 Removed features remain in the audit with their removal status and unavailable
 transformation values left blank. XGB uses retained omics features plus retained
-`FEMALE`; other retained covariates are ENET-only.
+`FEMALE`; other retained covariates are ENET-only training adjustments.
 
 The file is also the preprocessing recipe for future inference. For a given
-follow-up, the retained rows where `IN_ENET` or `IN_XGB` is true define that
-model's feature set, and their row order is the required matrix column order.
+follow-up, the retained deployable rows where `IN_ENET` or `IN_XGB` is true
+define that model's deployment feature set, and their row order is the required
+matrix column order.
 
 ---
 
@@ -335,7 +338,9 @@ ENET receives:
 all retained omics changes + FEMALE + all requested additional covariates
 ```
 
-Factor and logical covariates are expanded with `model.matrix(~ . - 1)`.
+Requested additional covariates must already be numeric. During inference,
+non-`FEMALE` adjustment covariates are omitted, equivalent to setting their
+standardized values to zero.
 
 ### XGB
 

@@ -132,8 +132,11 @@
   for (covar in if (is.null(additional_covariates)) character(0) else additional_covariates) {
     col_data <- pheno[[covar]]
 
-    if (!is.numeric(col_data) && !is.factor(col_data) && !is.logical(col_data)) {
-      stop("Additional covariate '", covar, "' must be numeric, factor, or logical")
+    if (!is.numeric(col_data)) {
+      stop(
+        "Additional covariate '", covar, "' must be numeric. ",
+        "Categorical covariates must be one-hot encoded before calling FAST_treatment_ML."
+      )
     }
 
     na_rows <- is.na(col_data)

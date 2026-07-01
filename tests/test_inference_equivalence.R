@@ -109,16 +109,24 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
       train_matrix_path <- fu_manifest$artifacts[[paste0(model_name, "_train")]]
       train_matrix <- read.csv(train_matrix_path, check.names = FALSE)
       replayed_matrix <- inference$matrices[[fu_key]][[model_name]]
+      deployable_train_matrix <- train_matrix[
+        ,
+        names(train_matrix)[
+          !startsWith(names(train_matrix), "covariate::") |
+            names(train_matrix) == "covariate::FEMALE"
+        ],
+        drop = FALSE
+      ]
 
       .expect_equal(
         colnames(replayed_matrix),
-        names(train_matrix),
-        paste(fu_key, model_name, "inference matrix columns match training")
+        names(deployable_train_matrix),
+        paste(fu_key, model_name, "inference matrix columns match deployable training columns")
       )
       .expect_equal(
         as.matrix(replayed_matrix),
-        as.matrix(train_matrix),
-        paste(fu_key, model_name, "inference matrix values match training"),
+        as.matrix(deployable_train_matrix),
+        paste(fu_key, model_name, "inference matrix values match deployable training columns"),
         tolerance = 1e-10
       )
 
@@ -145,12 +153,20 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
         saved_predictions$SUBJECT_ID,
         paste(fu_key, model_name, "inference prediction subjects match training")
       )
-      .expect_equal(
-        inferred_predictions$PREDICTED_PROB,
-        saved_predictions$PREDICTED_PROB,
-        paste(fu_key, model_name, "inference predictions match training"),
-        tolerance = if (model_name == "xgb") 1e-7 else 1e-10
-      )
+      if (model_name == "xgb") {
+        .expect_equal(
+          inferred_predictions$PREDICTED_PROB,
+          saved_predictions$PREDICTED_PROB,
+          paste(fu_key, model_name, "inference predictions match training"),
+          tolerance = 1e-7
+        )
+      } else {
+        .expect_true(
+          !any(startsWith(colnames(replayed_matrix), "covariate::") &
+                 colnames(replayed_matrix) != "covariate::FEMALE"),
+          paste(fu_key, model_name, "inference omits training-only adjustment covariates")
+        )
+      }
       .expect_true(
         nrow(validation_row) == 1L &&
           validation_row$N == nrow(inferred_predictions) &&

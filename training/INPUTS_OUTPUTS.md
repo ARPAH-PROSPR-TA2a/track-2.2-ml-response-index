@@ -5,6 +5,10 @@ output:
 ---
 # FAST Treatment ML: Inputs and Outputs
 
+This document is a schema reference for `FAST_treatment_ML()` and
+`FAST_export_models()`. It describes what the training pipeline expects, what it
+writes during fitting, and what is packaged for inference.
+
 ## Inputs
 
 ### `pheno`
@@ -13,15 +17,20 @@ Required columns:
 
 | Column | Requirement |
 |:---|:---|
-| `SAMPLE_ID` | Unique sample identifier |
+| `SAMPLE_ID` | Unique sample identifier; must match omics sample columns |
 | `SUBJECT_ID` | Subject identifier shared across visits |
-| `FU` | Consecutive integers starting at `0` |
+| `FU` | Consecutive integer visit index beginning at `0` |
 | `TREATMENT_GROUP` | Binary assigned treatment, `0/1` |
 | `FEMALE` | Binary sex indicator, `0/1` |
 
-Variables named through `additional_covariates` must be numeric, factor, or
-logical. `FEMALE` is included in the models automatically and does not need to
-be listed in `additional_covariates`.
+`additional_covariates`, when supplied, names extra phenotype columns used only
+as ENET training adjustment covariates. These columns must be numeric. Raw
+categorical covariates are not accepted; one-hot encode them upstream and pass
+the numeric indicator columns. `FEMALE` is added automatically and should not be
+listed in `additional_covariates`.
+
+Rows missing requested additional covariates are removed before modeling.
+Subjects must have a baseline sample and at least one follow-up sample.
 
 ### `omics`
 
@@ -30,29 +39,47 @@ be listed in `additional_covariates`.
 | `ANALYTE_NAME` | Feature/probe identifier |
 | Sample columns | Numeric measurements named by `pheno$SAMPLE_ID` |
 
+For DNAm runs, the pipeline restricts features to the reliable probe list in
+`Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds`.
+
 ### Model Features
 
-For every nonzero follow-up:
+Each nonzero follow-up is modeled independently. Omics features are baseline to
+follow-up changes:
 
 ```text
 omics_change = omics at FU k - omics at FU 0
 ```
 
-- ENET: omics changes plus `FEMALE` and all requested covariates.
-- XGB: omics changes plus `FEMALE`.
+Model-ready feature sets:
 
-No baseline or level omics features are included. Processing removes all-missing
-training features, then uses training-set medians, variance filtering, centers,
-and scales. This removes `FEMALE` when it has zero training variance.
+| Model | Training features | Deployment features |
+|:---|:---|:---|
+| ENET | Retained omics changes, retained `FEMALE`, retained numeric `additional_covariates` | Retained omics changes and retained `FEMALE` |
+| XGB | Retained omics changes and retained `FEMALE` | Retained omics changes and retained `FEMALE` |
 
-DNAm is restricted to the reliable probe list in
-`Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds`.
+All candidate features use training-only preprocessing: all-missing removal,
+median imputation, zero-variance filtering, centering, and scaling. A retained
+training-only ENET adjustment covariate is omitted during inference, equivalent
+to setting its standardized value to zero.
 
-## Output Directory
+## Run Output Layout
+
+`FAST_treatment_ML(..., output_dir = "path")` writes:
 
 ```text
 output_dir/
   manifest.json
+  data/
+    FU1/
+      subjects.csv
+      enet_train.csv.gz
+      xgb_train.csv.gz
+      xgb_folds.csv
+      enet/
+        predictions.csv
+      xgb/
+        predictions.csv
   models/
     reports/
       cohort.csv
@@ -67,74 +94,91 @@ output_dir/
         importance.csv
         tuning.csv
         model.json
-  data/
-    FU1/
-      enet_train.csv.gz
-      xgb_train.csv.gz
-      subjects.csv
-      xgb_folds.csv
-      enet/
-        predictions.csv
-      xgb/
-        predictions.csv
 ```
 
-One directory is produced per modelable follow-up under both `models/` and
-`data/`. The `models/` tree contains aggregate reports and fitted model
-artifacts; `data/` contains subject-level training artifacts.
+The `FU*` directory repeats for each modelable nonzero follow-up. `data/`
+contains model-ready matrices and subject-level outputs. `models/` contains
+reports and fitted model artifacts. `manifest.json` records run settings,
+requested models/covariates, follow-up entries, and paths to emitted artifacts.
 
-### Model Matrices
+`models/exported_models/` is created only when `FAST_export_models()` is called.
 
-`data/FU*/enet_train.csv.gz` and `data/FU*/xgb_train.csv.gz` are the exact
-numeric matrices passed to each worker.
-
-Column prefixes identify provenance:
-
-- `omics::<analyte>`
-- `covariate::<encoded covariate>`
+## `data/`: Model-Ready Data
 
 ### `data/FU*/subjects.csv`
 
+Shared row map for the model matrices and prediction files.
+
 | Column | Meaning |
 |:---|:---|
-| `SUBJECT_ID` | Subject identifier |
+| `SUBJECT_ID` | Subject represented by the matrix row |
 | `FU` | Follow-up modeled |
-| `TREATMENT_GROUP` | Outcome |
-| `ENET_FOLD_ID` | ENET CV fold |
+| `TREATMENT_GROUP` | Binary prediction target |
+| `ENET_FOLD_ID` | Treatment-stratified ENET CV fold |
+
+### `data/FU*/enet_train.csv.gz`
+
+Exact numeric matrix passed to ENET. Columns are in the same order as retained
+`IN_ENET` rows in `models/reports/preprocessing.csv`.
+
+Feature names are prefixed:
+
+| Prefix | Meaning |
+|:---|:---|
+| `omics::` | Baseline-to-follow-up omics change |
+| `covariate::` | Preprocessed phenotype covariate |
+
+ENET receives retained omics features, retained `FEMALE`, and retained numeric
+additional covariates. Covariate columns are unpenalized in ENET.
+
+### `data/FU*/xgb_train.csv.gz`
+
+Exact numeric matrix passed to XGB. Columns are in the same order as retained
+`IN_XGB` rows in `models/reports/preprocessing.csv`.
+
+XGB receives retained omics features and retained `FEMALE` only. Other requested
+covariates are intentionally absent.
 
 ### `data/FU*/xgb_folds.csv`
 
-Contains the repeated XGB cross-validation assignments:
+Repeated treatment-stratified XGB CV assignments.
 
 | Column | Meaning |
 |:---|:---|
 | `SUBJECT_ID` | Training subject identifier |
 | `REPEAT` | XGB CV repeat number |
-| `FOLD_ID` | Treatment-stratified fold within that repeat |
+| `FOLD_ID` | Fold within that repeat |
+
+### `data/FU*/{enet,xgb}/predictions.csv`
+
+Training-cohort predictions from the final fitted model.
+
+| Column | Meaning |
+|:---|:---|
+| `SUBJECT_ID` | Training subject identifier |
+| `FU` | Follow-up modeled |
+| `TREATMENT_GROUP` | Binary target |
+| `PREDICTED_PROB` | Predicted probability for treatment group `1` |
+
+## `models/`: Reports and Fitted Artifacts
 
 ### `models/reports/cohort.csv`
 
-Contains one row for every modelable follow-up.
+One row per modelable follow-up.
 
 | Column | Meaning |
 |:---|:---|
 | `FU` | Follow-up modeled |
-| `N_SUBJECTS` | Number of subjects |
+| `N_SUBJECTS` | Number of modeled subjects |
 | `N_CONTROL` | Control-arm subjects |
 | `N_TREATMENT` | Treatment-arm subjects |
 | `N_MALE` | Male subjects |
 | `N_FEMALE` | Female subjects |
 
-Eligibility requires both baseline and the modeled follow-up after input-level
-covariate filtering.
-
 ### `models/reports/change_summary.csv`
 
-Summarizes raw, pre-imputation omics changes by treatment arm:
-
-```text
-omics(FU k) - omics(FU 0)
-```
+Raw, pre-imputation omics change summaries by follow-up, treatment arm, and
+analyte.
 
 | Column | Meaning |
 |:---|:---|
@@ -147,9 +191,8 @@ omics(FU k) - omics(FU 0)
 
 ### `models/reports/preprocessing.csv`
 
-Contains one row per candidate omics or encoded covariate feature. This file is
-both an audit table and the serialized preprocessing recipe for reconstructing
-model matrices on future data.
+Stacked audit table and serialized preprocessing recipe. It has one row per
+candidate omics feature or encoded covariate for each modeled follow-up.
 
 | Column | Meaning |
 |:---|:---|
@@ -160,81 +203,82 @@ model matrices on future data.
 | `MEDIAN` | Training-set imputation median |
 | `CENTER` | Training-set centering value |
 | `SCALE` | Training-set scaling value |
-| `IN_ENET` | Whether the final ENET matrix contains the feature |
-| `IN_XGB` | Whether the final XGB matrix contains the feature |
+| `IN_ENET` | Whether the ENET training matrix contains the feature |
+| `IN_XGB` | Whether the XGB training matrix contains the feature |
+| `DEPLOYABLE` | Whether inference uses the feature on future datasets |
 
-Unavailable transformation values are blank for removed features. For a given
-follow-up and model, filtering to retained rows with `IN_ENET` or `IN_XGB`
-defines the model feature set. The filtered row order is the required matrix
-column order.
+Rows removed before scaling have blank transformation values as appropriate. For
+deployment, inference uses retained rows with `DEPLOYABLE = TRUE` and the model
+flag set.
 
-### `manifest.json`
+### `models/FU*/enet/metrics.csv`
 
-Contains the run settings, requested models and covariates, follow-up entries,
-and paths to every emitted artifact.
+One row per fitted ENET model.
 
-## ENET Output
+| Column | Meaning |
+|:---|:---|
+| `CV_AUC` | Pooled out-of-fold AUC at `lambda.min` |
+| `INSAMPLE_AUC` | AUC on the training matrix |
+| `LAMBDA` | Selected `cv.glmnet()` `lambda.min` |
+| `LAMBDA_1SE` | `cv.glmnet()` one-standard-error lambda, recorded only |
+| `ALPHA` | Elastic-net mixing parameter |
+| `N_FEATURES` | Number of ENET matrix columns |
+| `N_NONZERO` | Number of non-intercept nonzero coefficients |
+| `N_UNPENALIZED` | Number of covariate columns fit with `penalty.factor = 0` |
 
-`enet/metrics.csv` contains:
+### `models/FU*/enet/weights.csv`
 
-- `CV_AUC`
-- `INSAMPLE_AUC`
-- `LAMBDA`
-- `LAMBDA_1SE`
-- `ALPHA`
-- `N_FEATURES`
-- `N_NONZERO`
-- `N_UNPENALIZED`
+Scoring table for ENET.
 
-`LAMBDA` is `cv.glmnet()`'s deviance-selected `lambda.min`. `CV_AUC` is the
-pooled out-of-fold AUC at that lambda. `LAMBDA_1SE` is recorded for reference
-but is not used for the final model.
+| Column | Meaning |
+|:---|:---|
+| `FEATURE_NAME` | `(Intercept)` or prefixed feature name |
+| `WEIGHT` | Fitted coefficient at `LAMBDA` |
+| `FEATURE_TYPE` | `intercept`, `omics`, or `covariate` |
 
-`data/FU*/enet/predictions.csv` contains:
+This file includes the intercept, selected nonzero omics coefficients, and all
+unpenalized covariate coefficients.
 
-- `SUBJECT_ID`
-- `FU`
-- `TREATMENT_GROUP`
-- `PREDICTED_PROB`
+### `models/FU*/xgb/metrics.csv`
 
-`models/FU*/enet/weights.csv` contains the intercept, selected nonzero omics
-coefficients, and all unpenalized covariate coefficients:
+One row per fitted XGB model.
 
-- `FEATURE_NAME`
-- `WEIGHT`
-- `FEATURE_TYPE`
+| Column | Meaning |
+|:---|:---|
+| `CV_AUC` | Mean AUC across repeated CV runs for the selected trial |
+| `CV_AUC_SD` | Standard deviation of repeated CV AUCs |
+| `CV_REPEATS` | Number of CV repeats |
+| `INSAMPLE_AUC` | AUC on the training matrix |
+| `BEST_ITERATION` | Median best boosting round used for final fitting |
+| `N_FEATURES` | Number of XGB matrix columns |
+| `PARAM_*` | Selected XGBoost parameters |
 
-Together with the model-ready matrix, these weights reproduce ENET predictions
-without an R model object. The selected lambda remains in `metrics.csv`.
+### `models/FU*/xgb/importance.csv`
 
-## XGB Output
+Gain-based XGBoost feature importance.
 
-`xgb/metrics.csv` contains mean repeated-CV AUC, CV AUC SD, repeat count,
-in-sample AUC, median best iteration, feature count, and selected XGBoost
-parameters.
+| Column | Meaning |
+|:---|:---|
+| `FEATURE_NAME` | Prefixed feature name |
+| `GAIN` | XGBoost gain importance |
+| `FEATURE_TYPE` | `omics` or `covariate` |
 
-`data/FU*/xgb/predictions.csv` uses the same schema as ENET predictions.
+### `models/FU*/xgb/tuning.csv`
 
-`xgb/importance.csv` contains:
+One row per Optuna trial. It records the trial parameters, mean repeated-CV AUC,
+CV AUC SD, per-repeat AUCs, per-repeat best iterations, and median best
+iteration. XGB requires at least 10 trials; fewer than 30 produce a
+limited-search warning.
 
-- `FEATURE_NAME`
-- `GAIN`
-- `FEATURE_TYPE`
+### `models/FU*/xgb/model.json`
 
-`xgb/tuning.csv` contains mean and SD CV AUC, per-repeat AUCs and best
-iterations, median best iteration, and parameters for every Optuna trial. XGB
-requires at least 10 trials; fewer than 30 produce a limited-search warning.
-
-`models/FU*/xgb/model.json` is the fitted XGBoost model.
+Serialized fitted XGBoost model written by `xgboost`. This is the worker-level
+model artifact used before export.
 
 ## Exported Model Packages
 
-`FAST_export_models()` writes one JSON package for each fitted model. Each
-package is self-contained and can be evaluated without the training manifest.
-Models with `CV_AUC >= 0.8` have `successful = true`; lower-AUC models are still
-exported with `successful = false`.
-
-Default export location:
+`FAST_export_models()` writes one self-contained JSON package per fitted
+`(follow-up, model)` and an index file:
 
 ```text
 output_dir/
@@ -246,28 +290,76 @@ output_dir/
 
 `exported_models.csv` contains:
 
-- `MODEL_ID`
-- `FU`
-- `MODEL`
-- `TRAINING_CV_AUC`
-- `SUCCESS_AUC_THRESHOLD`
-- `SUCCESSFUL`
-- `PATH`
+| Column | Meaning |
+|:---|:---|
+| `MODEL_ID` | Stable package identifier |
+| `FU` | Follow-up modeled |
+| `MODEL` | `enet` or `xgb` |
+| `TRAINING_CV_AUC` | Training CV AUC copied from model metrics |
+| `SUCCESS_AUC_THRESHOLD` | Current success threshold, `0.8` |
+| `SUCCESSFUL` | `TRUE` when `TRAINING_CV_AUC >= SUCCESS_AUC_THRESHOLD` |
+| `PATH` | Path to the JSON package |
 
-Common fields include:
+Each `<model_id>.json` has this shape. The example below is ENET; XGB packages
+use `xgb_model_json` instead of `weights`.
 
-- `schema_version`
-- `model_id`
-- `family`
-- `fu`
-- `target`
-- `omics_type`
-- `training_cv_auc`
-- `success_auc_threshold`
-- `successful`
-- `covariates`
-- `training_metrics`
-- `preprocessing`
+```json
+{
+  "schema_version": "1.0",
+  "model_id": "...",
+  "family": "enet",
+  "fu": 1,
+  "target": "TREATMENT_GROUP",
+  "omics_type": "Proteomics",
+  "feature_mode": "change",
+  "training_cv_auc": 0.91,
+  "success_auc_threshold": 0.8,
+  "successful": true,
+  "source": {
+    "output_dir": "...",
+    "manifest_path": "..."
+  },
+  "covariates": {
+    "additional_covariates": ["age"],
+    "model_covariates": ["FEMALE", "age"]
+  },
+  "training_metrics": [{ "...": "..." }],
+  "preprocessing": [{ "...": "..." }],
+  "weights": [{ "...": "..." }]
+}
+```
 
-ENET packages additionally contain `weights`. XGB packages additionally contain
-`xgb_model_json`.
+Common fields:
+
+| Field | Meaning |
+|:---|:---|
+| `schema_version` | Export package schema version |
+| `model_id` | Identifier used for the JSON filename and export index |
+| `family` | `enet` or `xgb` |
+| `fu` | Required follow-up level |
+| `target` | Prediction target, currently `TREATMENT_GROUP` |
+| `omics_type` | Training omics type |
+| `feature_mode` | Feature construction mode, currently `change` |
+| `training_cv_auc` | Model CV AUC from training |
+| `success_auc_threshold` | Threshold used to set `successful` |
+| `successful` | Whether the model passed the training CV AUC threshold |
+| `source` | Original training output directory and manifest path |
+| `covariates` | Recorded training covariate settings |
+| `training_metrics` | The model's `metrics.csv` row |
+| `preprocessing` | Retained model-specific preprocessing rows in matrix order |
+
+ENET packages additionally contain:
+
+| Field | Meaning |
+|:---|:---|
+| `weights` | The ENET `weights.csv` table embedded in JSON |
+
+XGB packages additionally contain:
+
+| Field | Meaning |
+|:---|:---|
+| `xgb_model_json` | The serialized XGBoost model JSON embedded as a string |
+
+The package `preprocessing` rows include all retained training rows for that
+model. During inference, only rows with `DEPLOYABLE = TRUE` are reconstructed.
+For ENET, omitted nondeployable covariates are treated as standardized zero.

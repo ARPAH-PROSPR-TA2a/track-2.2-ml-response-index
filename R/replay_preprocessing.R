@@ -30,6 +30,20 @@
 }
 
 
+.deployable_preprocessing <- function(preprocessing) {
+  if ("DEPLOYABLE" %in% names(preprocessing)) {
+    return(preprocessing[preprocessing$DEPLOYABLE, , drop = FALSE])
+  }
+
+  preprocessing[
+    preprocessing$FEATURE_TYPE == "omics" |
+      preprocessing$FEATURE_NAME == "covariate::FEMALE",
+    ,
+    drop = FALSE
+  ]
+}
+
+
 .empty_matrix <- function(n) {
   matrix(numeric(0), nrow = n, ncol = 0)
 }
@@ -92,7 +106,9 @@
     stop("FU", fu_level, ": no subjects after requiring baseline and follow-up.")
   }
 
-  feature_rows <- .model_preprocessing(preprocessing, fu_level, model)
+  feature_rows <- .deployable_preprocessing(
+    .model_preprocessing(preprocessing, fu_level, model)
+  )
   omics_rows <- feature_rows[feature_rows$FEATURE_TYPE == "omics", , drop = FALSE]
   covariate_rows <- feature_rows[feature_rows$FEATURE_TYPE == "covariate", , drop = FALSE]
 
@@ -103,7 +119,7 @@
   )
   covariate_raw <- .make_covariate_model_matrix(
     change_data$pheno_followup,
-    model_covariates
+    sub("^covariate::", "", covariate_rows$FEATURE_NAME)
   )
   covariate_matrix <- .apply_preprocessing_recipe(
     covariate_raw,

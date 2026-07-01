@@ -79,6 +79,12 @@ run_validation_tests <- function() {
     "phenotype validation returns the ML phenotype table"
   )
 
+  .expect_error(
+    suppressWarnings(.validate_pheno(fixture$pheno, additional_covariates = "site")),
+    "Additional covariate 'site' must be numeric.",
+    "categorical additional covariates must be encoded before training"
+  )
+
   single_sex_pheno <- fixture$pheno
   single_sex_pheno$FU <- factor(single_sex_pheno$FU)
   single_sex_pheno$TREATMENT_GROUP <- factor(single_sex_pheno$TREATMENT_GROUP, levels = 0:1)
@@ -458,7 +464,7 @@ run_end_to_end_tests <- function() {
     pheno = fixture$pheno,
     omics = fixture$omics,
     omics_type = "Proteomics",
-    additional_covariates = c("age", "bmi", "site", "smoker"),
+    additional_covariates = c("age", "bmi"),
     models = c("enet", "xgb"),
     output_dir = output_dir,
     enet_cv_folds = 5L,
@@ -567,7 +573,7 @@ run_end_to_end_tests <- function() {
       names(preprocessing),
       c(
         "FU", "FEATURE_NAME", "FEATURE_TYPE", "STATUS", "MEDIAN", "CENTER",
-        "SCALE", "IN_ENET", "IN_XGB"
+        "SCALE", "IN_ENET", "IN_XGB", "DEPLOYABLE"
       )
     ) &&
       identical(sort(unique(preprocessing$FU)), 1:2) &&
@@ -580,6 +586,17 @@ run_end_to_end_tests <- function() {
         ))
       ),
     "preprocessing CSV audits retained and removed model features"
+  )
+  .expect_true(
+    all(preprocessing$DEPLOYABLE[
+      preprocessing$FEATURE_TYPE == "omics" |
+        preprocessing$FEATURE_NAME == "covariate::FEMALE"
+    ]) &&
+      !any(preprocessing$DEPLOYABLE[
+        preprocessing$FEATURE_TYPE == "covariate" &
+          preprocessing$FEATURE_NAME != "covariate::FEMALE"
+      ]),
+    "preprocessing CSV marks only omics and FEMALE as deployable"
   )
 
   for (fu_key in names(manifest$followups)) {

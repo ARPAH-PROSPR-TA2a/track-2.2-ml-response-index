@@ -94,12 +94,13 @@ inputs <- .prepare_inputs(
   pheno = pheno,
   omics = omics,
   omics_type = model_package$omics_type,
-  additional_covariates = additional_covariates
+  additional_covariates = NULL
 )
 ```
 
 This uses the same validation path as training. Inference additionally depends
 on observed `TREATMENT_GROUP`, because validation statistics require labels.
+Training-only `additional_covariates` are not required for inference.
 
 ### Step 3: Rebuild the Model Matrix
 
@@ -116,13 +117,17 @@ replay <- .build_inference_matrix(
 
 The replay step differs from training in one key way: it does not decide which
 features to retain. It applies the retained feature list and learned parameters
-from training. This includes:
+from training, then keeps only deployable rows. This includes:
 
 - omics change features, defined as follow-up minus baseline;
 - feature removal decisions;
 - median imputation values;
 - centering and scaling values;
 - model-specific feature order.
+
+Deployable rows are omics features and retained `FEMALE`. Other ENET covariates
+are training-only adjustment features and are omitted from inference, equivalent
+to standardized value zero.
 
 If `return_matrix = TRUE`, this matrix is returned for audit/debugging.
 

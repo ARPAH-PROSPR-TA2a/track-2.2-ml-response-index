@@ -3,7 +3,9 @@
 Inference scores exported FAST treatment models on a labeled cohort and reports
 validation against observed treatment status. It uses the same input validation,
 omics change definition, feature naming, and training-derived preprocessing
-recipe as the training pipeline.
+recipe as the training pipeline, but only deployable features are required:
+omics changes and retained `FEMALE`. Training-only ENET adjustment covariates
+are not required on future datasets.
 
 Run from the repository root:
 

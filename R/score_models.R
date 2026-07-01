@@ -7,7 +7,19 @@
   feature_weights <- weights[weights$FEATURE_NAME != "(Intercept)", , drop = FALSE]
   missing_features <- setdiff(feature_weights$FEATURE_NAME, colnames(x))
   if (length(missing_features) > 0L) {
-    stop("ENET matrix missing feature(s): ", paste(missing_features, collapse = ", "))
+    omitted_adjustment <- startsWith(missing_features, "covariate::") &
+      missing_features != "covariate::FEMALE"
+    if (!all(omitted_adjustment)) {
+      stop(
+        "ENET matrix missing feature(s): ",
+        paste(missing_features[!omitted_adjustment], collapse = ", ")
+      )
+    }
+    feature_weights <- feature_weights[
+      feature_weights$FEATURE_NAME %in% colnames(x),
+      ,
+      drop = FALSE
+    ]
   }
 
   linear_predictor <- rep(intercept, nrow(x))

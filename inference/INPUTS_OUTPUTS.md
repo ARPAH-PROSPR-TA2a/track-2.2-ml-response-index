@@ -5,6 +5,11 @@ training. The important difference is that inference data must also include
 observed `TREATMENT_GROUP` labels, because validation reports compare model
 scores against treatment status.
 
+Inference does not require training-only `additional_covariates`. The replayed
+feature set is restricted to deployable preprocessing rows: omics changes and
+retained `FEMALE`. ENET covariates requested only for training adjustment are
+omitted at scoring time, equivalent to standardized value zero.
+
 The preferred API evaluates self-contained model JSON packages written by
 `FAST_export_models()`. The exported package schema is owned by
 `training/INPUTS_OUTPUTS.md`; this document focuses on what inference consumes

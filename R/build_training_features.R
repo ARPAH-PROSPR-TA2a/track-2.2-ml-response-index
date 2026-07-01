@@ -142,6 +142,7 @@
     SCALE = unname(scale_values),
     IN_ENET = status == "retained",
     IN_XGB = feature_names %in% xgb_feature_names,
+    DEPLOYABLE = feature_type == "omics" | feature_names == "covariate::FEMALE",
     stringsAsFactors = FALSE
   )
 }

@@ -48,9 +48,13 @@ CV folds are subject-level and stratified by treatment. Each follow-up must have
 at least as many subjects in each treatment arm as the requested fold count.
 
 ENET receives omics changes, `FEMALE`, and every requested
-`additional_covariates` variable. XGB receives omics changes plus `FEMALE`;
-other covariates are excluded from XGB. If `FEMALE` has zero variance in the
-training set for a follow-up, preprocessing removes it from both models.
+numeric `additional_covariates` variable as training-only adjustment features.
+XGB receives omics changes plus `FEMALE`; other covariates are excluded from
+XGB. If `FEMALE` has zero variance in the training set for a follow-up,
+preprocessing removes it from both models.
+
+Raw categorical covariates are not accepted. One-hot encode them upstream and
+pass the numeric indicator columns if they should be used for ENET adjustment.
 
 Feature columns use `omics::` and `covariate::` prefixes.
 
@@ -83,7 +87,9 @@ penalized; `FEMALE` and requested covariates are included with
 `penalty.factor = 0`. The final model uses `lambda.min`, selected by minimum
 cross-validated binomial deviance; out-of-fold AUC is reported at that lambda.
 Outputs include metrics, subject predictions, and coefficients sufficient to
-reproduce predictions without a saved R model object.
+reproduce deployment predictions without a saved R model object. Deployment
+scoring omits training-only adjustment covariates, equivalent to setting their
+standardized values to zero.
 
 ### XGB
 
