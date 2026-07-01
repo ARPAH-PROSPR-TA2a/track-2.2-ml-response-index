@@ -1,72 +1,24 @@
-# FAST Omics ML / Treatment ML: Code Walkthrough
+# FAST Treatment ML: Code Walkthrough
 
-This walkthrough documents the current Track 2.2 implementation. The pipeline
-predicts randomized treatment assignment from baseline-to-follow-up omics
-changes. Its modeling target is `TREATMENT_GROUP`.
+This document explains how the training code moves data through the pipeline.
+It is intentionally lighter than the schema reference. For exact input columns,
+artifact layouts, and exported JSON fields, see
+`training/INPUTS_OUTPUTS.md`.
 
-The main training function is `FAST_treatment_ML()`: it prepares model-ready
-datasets, fits ENET and/or XGB, writes training artifacts to disk, and returns a
-manifest. `FAST_export_models()` then packages each fitted model into a
-self-contained JSON file for cross-trial evaluation.
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Public Function and Arguments](#public-function-and-arguments)
-3. [Step 1: Validate and Prepare Inputs](#step-1-validate-and-prepare-inputs)
-4. [Step 2: Select Follow-Ups and Split Subjects](#step-2-select-follow-ups-and-split-subjects)
-5. [Step 3: Construct Change Features](#step-3-construct-change-features)
-6. [Step 4: Preprocess Features](#step-4-preprocess-features)
-7. [Step 5: Build Model-Specific Matrices](#step-5-build-model-specific-matrices)
-8. [Step 6: Fit ENET](#step-6-fit-enet)
-9. [Step 7: Fit XGB](#step-7-fit-xgb)
-10. [Step 8: Write Outputs, Reports, and Manifest](#step-8-write-outputs-reports-and-manifest)
-11. [Step 9: Export Model Packages](#step-9-export-model-packages)
-
----
-
-## Overview
-
-`FAST_treatment_ML()` takes phenotype and omics data, validates and aligns them,
-creates one modeling dataset per nonzero follow-up, converts each dataset into
-baseline-to-follow-up change features, preprocesses features using training-only
-parameters, fits ENET and/or XGB, writes model artifacts plus reports, and
-returns a manifest. `FAST_export_models()` consumes that manifest and writes one
-self-contained JSON package per fitted model.
+The training target is randomized treatment assignment:
 
 ```text
-FAST_treatment_ML()
-├── validate arguments
-├── validate pheno/omics and apply DNAm probe filtering
-├── for each nonzero FU:
-│   ├── require baseline + FU
-│   ├── validate treatment arms and requested CV folds
-│   ├── compute FU - baseline omics changes
-│   ├── preprocess using train-only parameters
-│   ├── build ENET and XGB matrices
-│   ├── write model-ready inputs
-│   ├── fit requested models
-│   └── collect report rows
-├── write models/reports/
-├── write manifest.json
-└── return manifest
-
-FAST_export_models()
-├── read manifest and model metrics
-├── mark each fitted model successful when CV_AUC >= 0.8
-├── embed model-specific preprocessing and scoring artifacts
-└── write models/exported_models/
+TREATMENT_GROUP
 ```
 
-Each section below follows that execution order. The complete external input
-and output contract is in `training/INPUTS_OUTPUTS.md`.
+Models use baseline-to-follow-up omics changes, not baseline levels.
 
-## Public Function and Arguments
+## Entrypoints
 
 File: `training/main.R`
 
 ```r
-FAST_treatment_ML <- function(
+FAST_treatment_ML(
   pheno,
   omics,
   omics_type = "Proteomics",
@@ -83,296 +35,212 @@ FAST_treatment_ML <- function(
 )
 ```
 
-`FAST_treatment_ML()` accepts these arguments:
-
-| Argument | Default | Role |
-|:---|:---|:---|
-| `pheno` | Required | Sample-level phenotype and treatment data. |
-| `omics` | Required | Analyte-by-sample numeric measurements. |
-| `omics_type` | `"Proteomics"` | Selects `"Proteomics"`, `"Metabolomics"`, or `"DNAm"` handling. It does not transform input values. |
-| `additional_covariates` | `NULL` | Optional numeric phenotype columns used as training-only ENET adjustment covariates. `FEMALE` is already required and is added to both models automatically. Rows missing a requested covariate are removed during training validation. |
-| `models` | `c("enet", "xgb")` | Selects one or both model workers. |
-| `output_dir` | `NULL` | Selects the artifact directory; `NULL` creates a timestamped directory under `runs/`. |
-| `enet_cv_folds` | `10L` | Requests the ENET fold count. |
-| `xgb_cv_folds` | `10L` | Requests the XGB fold count per repeat. |
-| `xgb_cv_repeats` | `3L` | Sets the number of independent XGB fold assignments. |
-| `xgb_n_trials` | `50L` | Sets the required Optuna search size. XGB requires at least `10`; values below `30` produce a warning. |
-| `n_cores` | `NULL` | Sets XGBoost threads; `NULL` uses one fewer than the detected core count. |
-| `python_bin` | `NULL` | Selects the XGB Python executable; `NULL` uses `python3`. |
-| `seed` | `1L` | Controls folds, model fitting, and tuning. |
-
-Argument validation happens before the pipeline touches data. `.validate_ml_args()`
-checks model names, fold counts, XGB repeat count, seed, runtime settings, and
-XGB trial count.
+`FAST_treatment_ML()` validates inputs, builds one modeling dataset per nonzero
+follow-up, fits ENET and/or XGB, writes artifacts, and returns a manifest.
 
 File: `R/write_training_artifacts.R`
 
 ```r
-FAST_export_models <- function(
-  manifest,
-  output_dir = NULL
-)
+FAST_export_models(manifest, output_dir = NULL)
 ```
 
-`manifest` can be the list returned by `FAST_treatment_ML()` or a path to
-`manifest.json`. `output_dir = NULL` writes to
-`manifest$models_dir/exported_models`.
+`FAST_export_models()` packages each fitted `(follow-up, model)` as a
+self-contained JSON file for inference.
 
-## Step 1: Validate and Prepare Inputs
+## File Map
 
-Input preparation is handled by `.prepare_inputs()`.
+| File | Role |
+|:---|:---|
+| `training/main.R` | Public training API and argument validation |
+| `R/validate_inputs.R` | Phenotype, omics, omics-type, and DNAm validation |
+| `R/build_training_features.R` | Follow-up datasets, change features, preprocessing, folds |
+| `R/write_training_artifacts.R` | Disk outputs, ENET fitting, XGB worker launch, export packages |
+| `training/scripts/run_xgb.py` | XGBoost tuning, fitting, and XGB artifacts |
+
+## High-Level Flow
+
+```text
+FAST_treatment_ML()
+├── validate function arguments
+├── validate pheno and omics
+├── apply DNAm probe validation/restriction when omics_type == "DNAm"
+├── for each nonzero FU:
+│   ├── require subjects with baseline + this FU
+│   ├── validate treatment arms and CV fold counts
+│   ├── compute follow-up minus baseline omics changes
+│   ├── preprocess omics and covariates using this training cohort
+│   ├── build ENET and XGB matrices
+│   ├── write model-ready data
+│   ├── fit requested models
+│   └── collect report rows
+├── write stacked reports
+├── write manifest.json
+└── return manifest
+```
+
+`FAST_export_models()` is separate. It reads the manifest and model artifacts,
+then writes portable JSON packages under `models/exported_models/`.
+
+## 1. Argument and Input Validation
+
+`FAST_treatment_ML()` first calls `.validate_ml_args()` in `training/main.R`.
+That function checks model names, fold counts, XGB repeat count, XGB trial count,
+seed, and runtime settings before touching the input data.
+
+Input preparation then flows through `.prepare_inputs()` in
+`R/validate_inputs.R`:
 
 ```text
 .prepare_inputs()
 ├── .validate_omics_type()
 ├── .validate_pheno()
 ├── .validate_omics()
-└── [DNAm only]
-    ├── load full and reliable probe lists
-    ├── .validate_dnam_probe_coverage()
-    └── .subset_omics(..., reliable_probes)
+└── [DNAm only] validate probe coverage and subset to reliable probes
 ```
 
-### Phenotype Data
+Important phenotype behavior:
 
-`pheno` must be a data frame or matrix with these columns:
+- `SAMPLE_ID` must be globally unique.
+- `FU` must be consecutive integers starting at `0`.
+- `FEMALE` and `TREATMENT_GROUP` must be binary `0/1`.
+- Duplicate `SUBJECT_ID`/`FU` rows are reduced to the first row with a warning.
+- `additional_covariates` must be numeric.
+- Rows missing requested additional covariates are dropped.
+- Subjects without both baseline and at least one follow-up are dropped.
 
-| Column | Requirement |
-|:---|:---|
-| `SAMPLE_ID` | Globally unique sample identifier |
-| `SUBJECT_ID` | Subject identifier shared across visits |
-| `FU` | Consecutive integer visit index beginning at `0` |
-| `TREATMENT_GROUP` | Binary `0/1`; both arms must be present |
-| `FEMALE` | Binary `0/1` |
+Additional covariates are training-only ENET adjustment covariates. Raw
+categorical covariates are rejected; callers should one-hot encode them upstream
+if they want numeric indicators included.
 
-Variables named in `additional_covariates` must exist and be numeric.
-Categorical covariates must be one-hot encoded upstream and passed as numeric
-indicator columns.
+Omics validation requires `ANALYTE_NAME`, numeric sample columns, and overlap
+with validated phenotype sample IDs. Missing values and near-zero variance are
+reported here, but the actual imputation and filtering happen per follow-up.
 
-### Omics Data
+## 2. Follow-Up Loop
 
-`omics` must be a data frame or matrix with:
+The main run body is `.run_ml_disk()` in `R/write_training_artifacts.R`.
 
-| Column | Requirement |
-|:---|:---|
-| `ANALYTE_NAME` | One feature identifier per row |
-| Sample columns | Numeric measurements named by `pheno$SAMPLE_ID` |
+For each nonzero `FU`, it:
 
-Extra samples are allowed on either side. The validator retains the
-intersection of phenotype sample IDs and omics column names.
+1. Finds subjects with both baseline and that follow-up.
+2. Checks that both treatment arms are present.
+3. Checks that each requested CV fold count is no larger than the smaller arm.
+4. Calls `.prepare_fu_change_dataset()`.
+5. Writes prepared matrices and fold files.
+6. Fits requested models.
+7. Stores report rows and paths in the manifest.
 
-### Phenotype Validation
+Each follow-up is independent. A subject can contribute to one follow-up and be
+absent from another if that subject is missing the corresponding visit.
 
-`.validate_pheno()`:
+## 3. Change Features
 
-- Converts matrix input to a data frame.
-- Requires all five core columns.
-- Requires `FU` values to be consecutive integers `0, 1, ..., max(FU)`.
-- Requires baseline and at least one `FU == 1` sample.
-- Converts `FU`, `FEMALE`, and `TREATMENT_GROUP` to factors when needed.
-- Rejects duplicate `SAMPLE_ID` values.
-- For duplicate `SUBJECT_ID`/`FU` pairs, keeps the first row with a warning.
-- Drops rows with missing requested covariates.
-- Retains only subjects with a baseline and at least one follow-up.
-- Returns the validated phenotype table used by this ML pipeline.
-
-### Omics Validation
-
-`.validate_omics()`:
-
-- Converts matrix input to a data frame.
-- Requires `ANALYTE_NAME`.
-- Requires every measurement column to be numeric.
-- Intersects omics columns with validated phenotype sample IDs.
-- Warns when analytes contain missing values or near-zero variance.
-- Returns the validated omics table used by this ML pipeline.
-
-Missing values and near-zero variance are reported here but handled later using
-training-only preprocessing for each follow-up.
-
-### DNAm Handling
-
-When `omics_type == "DNAm"`, `.prepare_inputs()` loads:
-
-```text
-Data/FAST_epicv1_epicv2_probe_list.rds
-Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
-```
-
-It validates that the input contains probes from both lists, then restricts
-the ML run to the reliable Sugden/TruD probe list.
-
----
-
-## Step 2: Select Follow-Ups and Validate Folds
-
-After validation, `FAST_treatment_ML()` enters `.run_ml_disk()`, which finds
-every nonzero `FU` level and processes each modelable follow-up independently.
-Each follow-up uses all subjects with both baseline and that specific follow-up.
-
-Before model preparation, `.run_ml_disk()` validates that both treatment arms
-are present and that the smaller arm has at least as many subjects as each
-requested fold count for the selected models. If a request is too large, the run
-stops with a message naming the offending argument and suggesting the largest
-valid fold count.
-
-### Cross-Validation Folds
-
-`.stratified_subject_folds()` assigns subjects to folds separately within each
-treatment arm.
-
-ENET receives one fold assignment, written to `subjects.csv` as
-`ENET_FOLD_ID`. XGB receives `xgb_cv_repeats` independently seeded assignments,
-written to `xgb_folds.csv` as `SUBJECT_ID`, `REPEAT`, and `FOLD_ID`.
-
-The fold assignment and model fitting for a follow-up use `seed + fu_level`.
-
----
-
-## Step 3: Construct Change Features
-
-`.prepare_fu_change_dataset()` builds one dataset for each nonzero follow-up.
-
-For each subject with both visits:
+`.make_followup_change_data()` constructs the omics matrix for one follow-up.
+For each subject:
 
 ```text
 omics_change(FU k) = omics(FU k) - omics(FU 0)
 ```
 
-The matrix operation is:
+The implementation is a matrix subtraction:
 
 ```r
 change_matrix <- t(followup_values - baseline_values)
 ```
 
-Rows are subjects and columns are analytes. Subject order is explicitly:
+Rows are subjects. Columns are analytes. Treatment labels come from the
+follow-up phenotype rows.
 
-```text
-all retained training subjects
-```
+Baseline omics levels are not model features.
 
-Treatment labels come from the follow-up phenotype rows. Preparation is skipped
-for a follow-up when:
+## 4. Preprocessing
 
-- no subjects remain after requiring both visits;
-- the training subjects lack one treatment arm; or
-- stratified CV folds cannot be created.
+Preprocessing is in `R/build_training_features.R`. Omics features and covariate
+features go through the same numeric sequence:
 
-Baseline omics levels are not model features. Only baseline-to-follow-up change
-values enter the models.
+1. Drop all-missing training columns.
+2. Median-impute missing values.
+3. Drop zero-variance training columns.
+4. Center and scale retained columns.
 
----
+All learned values come from the current follow-up's training cohort.
 
-## Step 4: Preprocess Features
+`.make_preprocessing_table()` writes the audit and replay recipe for every
+candidate feature. The key flags are:
 
-Omics and requested covariates use the same four-stage preprocessing sequence:
-
-1. Remove all-missing training features.
-2. Median imputation.
-3. Zero-variance filtering.
-4. Centering and scaling.
-
-All learned values come from the training set.
-
-### All-Missing Features
-
-`.drop_all_missing_train()` removes columns with no observed training values.
-
-### Median Imputation
-
-`.impute_train_median()` computes one median per training column and applies it
-to missing values.
-
-### Variance Filtering
-
-`.drop_zero_variance_train()` retains columns with training variance greater
-than `1e-12`.
-
-### Scaling
-
-`.scale_train()` computes training means and standard deviations. Missing or
-zero standard deviations are replaced by `1`.
-
-### Preprocessing Recipe
-
-For each candidate omics or encoded covariate feature, `preprocessing.csv`
-records:
-
-| Column | Meaning |
+| Flag | Meaning |
 |:---|:---|
-| `FEATURE_NAME` | Final prefixed model-matrix column |
-| `FEATURE_TYPE` | `omics` or `covariate` |
-| `STATUS` | `retained`, `all_missing_training`, or `zero_variance_training` |
-| `MEDIAN` | Training imputation median |
-| `CENTER` | Training mean after imputation/filtering |
-| `SCALE` | Training standard deviation |
-| `IN_ENET` | Whether ENET receives the feature |
-| `IN_XGB` | Whether XGB receives the feature |
-| `DEPLOYABLE` | Whether inference uses the feature on future datasets |
+| `IN_ENET` | Feature is retained in the ENET training matrix |
+| `IN_XGB` | Feature is retained in the XGB training matrix |
+| `DEPLOYABLE` | Feature is reconstructed during inference |
 
-Removed features remain in the audit with their removal status and unavailable
-transformation values left blank. XGB uses retained omics features plus retained
-`FEMALE`; other retained covariates are ENET-only training adjustments.
+`DEPLOYABLE` is true for omics features and `covariate::FEMALE`. Other
+additional covariates can adjust ENET during training, but future datasets are
+not expected to contain them.
 
-The file is also the preprocessing recipe for future inference. For a given
-follow-up, the retained deployable rows where `IN_ENET` or `IN_XGB` is true
-define that model's deployment feature set, and their row order is the required
-matrix column order.
+## 5. Model Matrices
 
----
-
-## Step 5: Build Model-Specific Matrices
-
-Feature names encode provenance:
-
-```text
-omics::<ANALYTE_NAME>
-covariate::<model.matrix column>
-```
-
-### ENET
+`.prepare_fu_change_dataset()` creates model-specific matrices.
 
 ENET receives:
 
 ```text
-all retained omics changes + FEMALE + all requested additional covariates
+retained omics changes
++ retained FEMALE
++ retained numeric additional_covariates
 ```
-
-Requested additional covariates must already be numeric. During inference,
-non-`FEMALE` adjustment covariates are omitted, equivalent to setting their
-standardized values to zero.
-
-### XGB
 
 XGB receives:
 
 ```text
-all retained omics changes
-+ FEMALE
+retained omics changes
++ retained FEMALE
 ```
 
-Other requested covariates are intentionally excluded from XGB. Consequently,
-the ENET and XGB matrices can have different column counts. `FEMALE` is subject
-to the same training-only variance filtering as every other covariate.
+Feature names are prefixed:
 
-The `IN_ENET` and `IN_XGB` columns in `preprocessing.csv` identify the retained
-feature set used by each model, in model-matrix order.
+```text
+omics::<ANALYTE_NAME>
+covariate::<covariate name>
+```
 
----
+`FEMALE` is added automatically to the model covariate list. If `FEMALE` has
+zero variance within a follow-up, preprocessing removes it from both model
+matrices.
 
-## Step 6: Fit ENET
+During inference, only deployable retained rows are reconstructed. For ENET,
+omitted non-`FEMALE` adjustment covariates are treated as standardized zero.
+
+## 6. Cross-Validation Folds
+
+`.stratified_subject_folds()` assigns folds separately within each treatment
+arm.
+
+ENET gets one fold assignment, stored as `ENET_FOLD_ID` in `subjects.csv`.
+XGB gets `xgb_cv_repeats` independent fold assignments, stored in
+`xgb_folds.csv`.
+
+The follow-up seed is:
+
+```text
+seed + fu_level
+```
+
+XGB repeats use incremented seeds from that follow-up seed.
+
+## 7. ENET Fitting
 
 File: `R/write_training_artifacts.R`
 
-`.run_enet_worker()` fits a binomial elastic net using `glmnet`.
+`.run_enet_worker()` fits a binomial elastic net with `glmnet::cv.glmnet()`:
 
 ```r
 glmnet::cv.glmnet(
-  x = enet_x_train,
-  y = y_train,
+  x = dataset$enet_x_train,
+  y = dataset$y_train,
   family = "binomial",
   alpha = 0.5,
-  foldid = enet_foldid,
+  foldid = dataset$enet_foldid,
   type.measure = "deviance",
   standardize = FALSE,
   penalty.factor = penalty_factor,
@@ -380,78 +248,47 @@ glmnet::cv.glmnet(
 )
 ```
 
-The prepared matrices are already standardized, so `glmnet` standardization is
-disabled.
+The matrix is already standardized, so `standardize = FALSE`.
 
-Penalty factors are:
+Penalty factors:
 
-| Feature type | Penalty factor |
+| Feature | Penalty |
 |:---|---:|
 | Omics | `1` |
-| Requested covariate | `0` |
+| Covariates | `0` |
 
-Covariates are therefore included as unpenalized adjustment features.
+`lambda.min` is selected by cross-validated binomial deviance. `CV_AUC` is then
+computed from out-of-fold predictions at `lambda.min`; AUC is reported but does
+not select the lambda.
 
-### Lambda Selection
+The worker writes metrics, training-cohort predictions, and a compact
+`weights.csv` with the intercept, selected nonzero omics coefficients, and all
+unpenalized covariate coefficients.
 
-`cv.glmnet()` selects `lambda.min`, the lambda with the lowest mean
-cross-validated binomial deviance. The worker then calculates pooled
-out-of-fold AUC from `fit.preval` at that selected lambda for reporting; AUC
-does not influence lambda selection. `lambda.1se` is retained as a reference
-value but is not used to fit the final model.
-
-### ENET Outputs
-
-- `metrics.csv`: pooled out-of-fold and in-sample AUC; selected
-  `lambda.min`; `lambda.1se`; alpha; feature counts.
-- `predictions.csv`: training-subject probabilities with subject IDs and labels.
-- `weights.csv`: intercept, nonzero omics coefficients, and every unpenalized
-  covariate coefficient.
-
-The saved weights and model-ready matrix reproduce the saved probabilities
-without serializing the R model object.
-
----
-
-## Step 7: Fit XGB
+## 8. XGB Fitting
 
 Files: `R/write_training_artifacts.R`, `training/scripts/run_xgb.py`
 
-R launches the worker with:
-
-```text
-<python_bin> training/scripts/run_xgb.py
-  --data-dir <data/FU directory>
-  --out-dir <models/FU directory>/xgb
-  --predictions-dir <data/FU directory>/xgb
-  --seed <seed + FU>
-  --nthread <n_cores>
-  --n-trials <xgb_n_trials>
-```
-
-`python_bin` defaults to `python3`. Callers can provide another executable name
-or path through `FAST_treatment_ML(python_bin = ...)`.
+R launches the Python worker with the prepared follow-up directory, output
+directory, prediction directory, seed, thread count, and trial count.
 
 The Python worker reads:
 
-- `xgb_train.csv.gz`
-- `subjects.csv`
-- `xgb_folds.csv`
-
-It requires `numpy`, `pandas`, `scikit-learn`, `xgboost`, and `optuna`.
-
-### Training and Search Settings
-
-All XGB runs use:
-
 ```text
-objective          binary:logistic
-eval_metric        auc
+xgb_train.csv.gz
+subjects.csv
+xgb_folds.csv
 ```
 
-Optuna tunes:
+It uses Optuna to tune a small XGBoost search space for binary logistic
+classification with AUC evaluation. Each trial runs XGB CV once per predefined
+repeat, with early stopping. The trial score is the mean best AUC across
+repeats. The final model is fit using the selected parameters and the median
+best iteration.
 
-| Parameter | Search range |
+Search bounds:
+
+| Parameter | Bounds |
 |:---|:---|
 | `max_depth` | Integer `1` to `4` |
 | `eta` | Log-uniform `0.005` to `0.08` |
@@ -461,140 +298,50 @@ Optuna tunes:
 | `lambda` | Log-uniform `1` to `100` |
 | `alpha` | Log-uniform `0.01` to `20` |
 
-For each trial, `xgb.cv()` runs once per predefined repeat using up to 500
-boosting rounds and early stopping after 25 rounds without improvement. The
-trial is scored by mean best AUC across repeats. CV AUC SD is retained as a
-stability diagnostic, and the median repeat-specific best iteration is used to
-fit the final model.
+The worker writes metrics, training-cohort predictions, gain importance, tuning
+history, and the fitted XGBoost `model.json`.
 
-By default, `xgb_n_trials = 50` and `xgb_cv_repeats = 3`, producing 150 XGBoost
-CV evaluations per follow-up. At least 10 trials are required; fewer than 30
-produce a warning because the search is limited.
+## 9. Outputs and Manifest
 
-### XGB Outputs
+Training writes exact model inputs before fitting models, then writes model
+artifacts after each worker finishes. Stacked reports are written under
+`models/reports/` after all modelable follow-ups complete.
 
-- `metrics.csv`: mean and SD repeated-CV AUC, repeat count, in-sample AUC,
-  median best iteration, feature count, and selected parameters.
-- `predictions.csv`: training-subject probabilities.
-- `importance.csv`: gain importance and feature type.
-- `tuning.csv`: trial-level mean and SD AUC, per-repeat AUC and best iteration,
-  median best iteration, and parameter values.
-- `model.json`: serialized XGBoost model.
+`manifest.json` records:
 
-If the Python process exits nonzero, R stops with the worker exit status while
-the Python traceback remains visible in the console.
+- run settings;
+- requested models and covariates;
+- report paths;
+- follow-up-specific data directories;
+- follow-up-specific model artifact paths.
 
----
+The returned R manifest is the same object plus `manifest_path`.
 
-## Step 8: Write Outputs, Reports, and Manifest
+The complete artifact schema is in `training/INPUTS_OUTPUTS.md`.
 
-The pipeline writes exact model inputs before fitting either model. It also
-accumulates per-follow-up report rows during preparation and writes one
-`models/reports/` directory after all modelable follow-ups finish.
+## 10. Exported Model Packages
 
-```text
-output_dir/
-  manifest.json
-  models/
-    reports/
-      cohort.csv
-      change_summary.csv
-      preprocessing.csv
-    FU1/
-      enet/
-        metrics.csv
-        weights.csv
-      xgb/
-        metrics.csv
-        importance.csv
-        tuning.csv
-        model.json
-  data/
-    FU1/
-      enet_train.csv.gz
-      xgb_train.csv.gz
-      subjects.csv
-      xgb_folds.csv
-      enet/
-        predictions.csv
-      xgb/
-        predictions.csv
-```
+`FAST_export_models()` reads the manifest and writes one package per fitted
+model. Each package embeds:
 
-The `FU*` structure repeats under both `models/` and `data/` for every
-modelable nonzero follow-up. The `models/reports/` files stack rows across all
-modelable follow-ups. `models/exported_models/` appears only after
-`FAST_export_models()` is called.
+- model identity and source run metadata;
+- training metrics and `successful = CV_AUC >= 0.8`;
+- retained model-specific preprocessing rows;
+- ENET weights or XGBoost model JSON;
+- recorded covariate settings.
 
-### `data/FU*/subjects.csv`
+The package is the preferred artifact for inference. It avoids requiring the
+whole training directory and keeps the preprocessing recipe beside the scoring
+payload.
 
-This is the shared row map for model matrices:
+For exact JSON fields, see `training/INPUTS_OUTPUTS.md`.
 
-| Column | Meaning |
-|:---|:---|
-| `SUBJECT_ID` | Subject represented by the matrix row |
-| `FU` | Follow-up modeled |
-| `TREATMENT_GROUP` | Binary prediction target |
-| `ENET_FOLD_ID` | ENET CV fold |
+## Design Invariants
 
-### `data/FU*/xgb_folds.csv`
-
-This file preserves every repeated XGB fold assignment:
-
-| Column | Meaning |
-|:---|:---|
-| `SUBJECT_ID` | Training subject |
-| `REPEAT` | Repeat number |
-| `FOLD_ID` | Fold within the repeat |
-
-### `models/reports/cohort.csv`
-
-For each modeled follow-up, this file records subject, treatment-arm, and sex
-counts for the modeled cohort.
-
-### `models/reports/change_summary.csv`
-
-This file summarizes the raw, pre-imputation change matrix by treatment arm.
-Each analyte row records subject count, nonmissing count, mean, median, SD,
-minimum, and maximum.
-
-### `models/reports/preprocessing.csv`
-
-This is the stacked preprocessing audit described above. The `FU` column
-identifies the follow-up that produced each feature row.
-
-### Manifest
-
-`manifest.json` records run settings, follow-up directories, canonical input
-artifacts, and requested model outputs. The returned R manifest adds
-`manifest_path` after the JSON file is written.
-
-Follow-ups that cannot produce a valid prepared dataset are stored as `NULL` in
-the in-memory manifest.
-
----
-
-## Step 9: Export Model Packages
-
-`FAST_export_models()` writes one JSON package per fitted `(FU, model)` under:
-
-```text
-output_dir/
-  models/
-    exported_models/
-      exported_models.csv
-      <model_id>.json
-```
-
-Each package is self-contained for evaluation. It embeds:
-
-- run metadata, target, omics type, follow-up, and model family;
-- training metrics, including `CV_AUC`;
-- `success_auc_threshold = 0.8`;
-- `successful`, computed as `CV_AUC >= 0.8`;
-- model-specific retained preprocessing rows in matrix order;
-- ENET weights or embedded XGBoost model JSON;
-- covariate metadata needed to rebuild the model matrix.
-
-`exported_models.csv` indexes every package and records `MODEL_ID`, `FU`,
-`MODEL`, `TRAINING_CV_AUC`, `SUCCESS_AUC_THRESHOLD`, `SUCCESSFUL`, and `PATH`.
+- Each follow-up is modeled independently.
+- All preprocessing parameters are learned within the follow-up training cohort.
+- Model matrix column order is defined by preprocessing rows.
+- XGB never receives additional covariates beyond retained `FEMALE`.
+- Additional covariates are numeric, ENET-only, and training-only for inference.
+- Export success is based on training `CV_AUC >= 0.8`; unsuccessful models are
+  still exported and marked accordingly.
