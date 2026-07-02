@@ -724,7 +724,7 @@ cat("\nTest summary\n")
 cat("============\n")
 cat("Sections:         ", completed_sections, "/4\n", sep = "")
 cat("Assertions passed:", getOption("track22.tests.passed", 0L), "\n")
-cat("Models exercised: ENET, XGB, Optuna, inference replay\n")
+cat("Models exercised: ENET, XGB, Optuna, exported-model inference\n")
 cat("Result:           ", if (is.null(result)) "PASS" else "FAIL", "\n", sep = "")
 
 if (!is.null(result)) {

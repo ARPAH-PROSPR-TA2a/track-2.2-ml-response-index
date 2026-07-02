@@ -290,13 +290,14 @@ Search bounds:
 
 | Parameter | Bounds |
 |:---|:---|
-| `max_depth` | Integer `1` to `4` |
+| `max_depth` | Integer `1` to `3` |
 | `eta` | Log-uniform `0.005` to `0.08` |
-| `min_child_weight` | Log-uniform `2` to `25` |
-| `subsample` | Uniform `0.55` to `0.95` |
-| `colsample_bytree` | Uniform `0.25` to `0.85` |
-| `lambda` | Log-uniform `1` to `100` |
-| `alpha` | Log-uniform `0.01` to `20` |
+| `min_child_weight` | Log-uniform `5` to `50` |
+| `subsample` | Uniform `0.6` to `0.9` |
+| `colsample_bytree` | Uniform `0.1` to `0.6` |
+| `lambda` | Log-uniform `5` to `200` |
+| `alpha` | Log-uniform `0.05` to `30` |
+| `gamma` | Uniform `0` to `5` |
 
 The worker writes metrics, training-cohort predictions, gain importance, tuning
 history, and the fitted XGBoost `model.json`.

@@ -12,8 +12,6 @@ FAST_evaluate()
 FAST_bulk_evaluate()
 ```
 
-`FAST_treatment_predict()` remains available for manifest-based replay.
-
 ## Overview
 
 ```text
@@ -192,7 +190,7 @@ output_dir/
   validation.csv
 ```
 
-The in-memory return value always includes the prediction and validation tables.
+Otherwise results are returned in memory only.
 
 ## `FAST_bulk_evaluate()`
 
@@ -203,44 +201,42 @@ FAST_bulk_evaluate <- function(
   pheno,
   omics,
   models_dir,
-  output_dir
+  output_dir,
+  only_successful = TRUE
 )
 ```
 
-Bulk evaluation is a thin loop over single-model evaluation. It expects the
-directory produced by `FAST_export_models()`.
+Bulk evaluation is a thin loop over single-model evaluation. It expects a
+directory of exported model JSON packages.
 
-### Step 1: Read the Export Index
+### Step 1: Find Model Packages
 
 ```r
-index_path <- file.path(models_dir, "exported_models.csv")
-index <- read.csv(index_path, stringsAsFactors = FALSE)
+model_paths <- .list_exported_model_packages(models_dir)
 ```
 
-Required columns are:
-
-- `MODEL_ID`
-- `PATH`
-- `SUCCESSFUL`
+Only `*.json` files in `models_dir` are considered. `exported_models.csv` may
+exist as an export audit artifact, but bulk evaluation does not read it.
 
 ### Step 2: Keep Successful Models
 
 ```r
-successful <- index[index$SUCCESSFUL, , drop = FALSE]
+if (only_successful && !isTRUE(model_package$successful)) next
 ```
 
-Failed training models are not evaluated in bulk. They still remain in the
-export directory, with `SUCCESSFUL == FALSE`, for audit and transfer.
+Failed training models are not evaluated in bulk by default. They can still
+remain in the directory, with `successful == false`, for audit and transfer.
 
 ### Step 3: Evaluate Each Model
 
-For each successful row, bulk evaluation calls:
+For each selected package, bulk evaluation calls the same package-level helper
+used by `FAST_evaluate()`:
 
 ```r
-FAST_evaluate(
+.evaluate_model_package(
   pheno = pheno,
   omics = omics,
-  model_path = model_path,
+  model_package = model_package,
   output_dir = model_output_dir
 )
 ```
@@ -266,27 +262,6 @@ model package path, and relative paths to the per-model output files.
 
 If no models are successful, the summary is still written with the expected
 columns and zero rows.
-
-## Manifest Replay
-
-File: `inference/main.R`
-
-```r
-FAST_treatment_predict <- function(...)
-```
-
-This API predates exported model packages. Instead of one self-contained JSON
-package, it consumes a full training `manifest.json` and the artifacts referenced
-inside it:
-
-- `models/reports/preprocessing.csv`
-- ENET `weights.csv`
-- XGB `model.json`
-
-It loops over requested follow-ups and model families, rebuilds matrices with
-the same replay helper, scores each model, and stacks validation rows. This path
-is still useful for reproducing training-run predictions and for regression
-tests, but exported JSON packages are the cleaner cross-trial interface.
 
 ## Shared Behavior With Training
 

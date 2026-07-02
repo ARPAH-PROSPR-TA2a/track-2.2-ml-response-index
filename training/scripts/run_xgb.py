@@ -137,13 +137,14 @@ def main():
         trial_params = dict(params)
         trial_params.update(
             {
-                "max_depth": trial.suggest_int("max_depth", 1, 4),
+                "max_depth": trial.suggest_int("max_depth", 1, 3),
                 "eta": trial.suggest_float("eta", 0.005, 0.08, log=True),
-                "min_child_weight": trial.suggest_float("min_child_weight", 2, 25, log=True),
-                "subsample": trial.suggest_float("subsample", 0.55, 0.95),
-                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.25, 0.85),
-                "lambda": trial.suggest_float("lambda", 1, 100, log=True),
-                "alpha": trial.suggest_float("alpha", 0.01, 20, log=True),
+                "min_child_weight": trial.suggest_float("min_child_weight", 5, 50, log=True),
+                "subsample": trial.suggest_float("subsample", 0.6, 0.9),
+                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 0.6),
+                "lambda": trial.suggest_float("lambda", 5, 200, log=True),
+                "alpha": trial.suggest_float("alpha", 0.05, 30, log=True),
+                "gamma": trial.suggest_float("gamma", 0, 5),
             }
         )
         result = evaluate_repeated_cv(trial_params)

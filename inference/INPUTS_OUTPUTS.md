@@ -1,9 +1,7 @@
 # FAST Inference Inputs and Outputs
 
 Inference uses the same validated phenotype and omics table conventions as
-training. The important difference is that inference data must also include
-observed `TREATMENT_GROUP` labels, because validation reports compare model
-scores against treatment status.
+training.
 
 Inference does not require training-only `additional_covariates`. The replayed
 feature set is restricted to deployable preprocessing rows: omics changes and
@@ -61,7 +59,8 @@ FAST_bulk_evaluate(
   pheno,
   omics,
   models_dir,
-  output_dir
+  output_dir,
+  only_successful = TRUE
 )
 ```
 
@@ -71,12 +70,13 @@ Inputs:
 |:---|:---|
 | `pheno` | Labeled phenotype table |
 | `omics` | Omics table |
-| `models_dir` | Directory containing exported model JSONs and `exported_models.csv` |
+| `models_dir` | Directory containing exported model JSON packages |
 | `output_dir` | Directory for bulk validation outputs |
+| `only_successful` | If `TRUE`, evaluate only packages whose embedded `successful` flag is `TRUE` |
 
-Bulk evaluation reads `models_dir/exported_models.csv`, evaluates only rows
-where `SUCCESSFUL == TRUE`, and stops if an expected model package cannot be
-scored.
+Bulk evaluation scans `models_dir` for `*.json` model packages. Package contents
+are authoritative; `exported_models.csv`, when present, is ignored. By default,
+only packages with embedded `successful == TRUE` are scored.
 
 Returns a list with:
 
@@ -85,27 +85,6 @@ Returns a list with:
 | `validation` | Bulk validation summary |
 | `output_dir` | Normalized output directory |
 | `output_files$validation_summary` | Path to `validation_summary.csv` |
-
-### `FAST_treatment_predict()`
-
-```r
-FAST_treatment_predict(
-  pheno,
-  omics,
-  manifest_path,
-  models = NULL,
-  followups = NULL,
-  omics_type = NULL,
-  enet_mode = "reproduce_training",
-  output_dir = NULL,
-  return_matrices = FALSE
-)
-```
-
-This is the older manifest-based replay API. It scores a full training manifest
-using model artifacts and `models/reports/preprocessing.csv`. It remains useful
-for tests and whole-run replay, but cross-trial validation should generally use
-exported model JSON packages.
 
 ## Single-Model Output
 
@@ -179,7 +158,7 @@ Each per-model directory contains the same `predictions.csv` and
 | `MODEL` | `enet` or `xgb` |
 | `TRAINING_CV_AUC` | CV AUC recorded in the exported model package |
 | `SUCCESS_AUC_THRESHOLD` | Training success threshold, currently `0.8` |
-| `SUCCESSFUL` | Always `TRUE` for evaluated rows |
+| `SUCCESSFUL` | `TRUE` for evaluated rows when `only_successful = TRUE` |
 | `N` | Evaluated subjects |
 | `N_CONTROL` | Evaluated control subjects |
 | `N_TREATMENT` | Evaluated treatment subjects |
@@ -193,19 +172,3 @@ Each per-model directory contains the same `predictions.csv` and
 
 If no exported models are successful, `validation_summary.csv` is written with
 the schema above and zero rows.
-
-## Manifest Replay Output
-
-When `FAST_treatment_predict(..., output_dir = "path")` is used:
-
-```text
-output_dir/
-  validation.csv
-  predictions/
-    FU1/
-      enet.csv
-      xgb.csv
-```
-
-`validation.csv` has the same validation schema as single-model evaluation.
-Each prediction file has the same prediction schema as `predictions.csv`.

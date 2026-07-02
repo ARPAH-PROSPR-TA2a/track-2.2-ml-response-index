@@ -1,19 +1,3 @@
-.manifest_vector <- function(x) {
-  if (is.null(x)) {
-    return(character(0))
-  }
-  as.character(unlist(x, use.names = FALSE))
-}
-
-
-.load_manifest <- function(manifest_path) {
-  if (!requireNamespace("jsonlite", quietly = TRUE)) {
-    stop("Package 'jsonlite' is required to read manifest files.")
-  }
-  jsonlite::fromJSON(manifest_path, simplifyVector = FALSE)
-}
-
-
 .model_preprocessing <- function(preprocessing, fu_level, model) {
   flag <- paste0("IN_", toupper(model))
   if (!flag %in% names(preprocessing)) {
