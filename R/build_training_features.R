@@ -261,17 +261,39 @@
 
   train_cov <- train_pheno[, additional_covariates, drop = FALSE]
   combined <- train_cov
-
+  
   for (col in names(combined)) {
     if (col == "FEMALE") {
       combined[[col]] <- .as_binary_numeric(combined[[col]])
     } else if (is.logical(combined[[col]])) {
       combined[[col]] <- factor(combined[[col]], levels = c(FALSE, TRUE))
+    } else if (is.factor(combined[[col]])) {
+      combined[[col]] <- droplevels(combined[[col]])
     }
   }
-
-  mm <- model.matrix(~ . - 1, data = combined)
-  train_mm <- mm[seq_len(nrow(train_cov)), , drop = FALSE]
+  
+  single_level_factor <- vapply(
+    combined,
+    function(x) is.factor(x) && nlevels(x) < 2L,
+    logical(1)
+  )
+  
+  if (any(single_level_factor)) {
+    message(
+      "Dropping single-level factor covariate(s) after follow-up filtering: ",
+      paste(names(combined)[single_level_factor], collapse = ", ")
+    )
+    combined <- combined[, !single_level_factor, drop = FALSE]
+  }
+  
+  if (ncol(combined) == 0L) {
+    train_mm <- matrix(numeric(0), nrow = nrow(train_cov), ncol = 0)
+  } else {
+    mm <- model.matrix(~ ., data = combined)
+    mm <- mm[, colnames(mm) != "(Intercept)", drop = FALSE]
+    colnames(mm) <- make.names(colnames(mm), unique = TRUE)
+    train_mm <- mm[seq_len(nrow(train_cov)), , drop = FALSE]
+  }
 
   nonmissing <- .drop_all_missing_train(train_mm)
   imputed <- .impute_train_median(nonmissing$train)
