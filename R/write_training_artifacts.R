@@ -71,7 +71,7 @@
     family = "binomial",
     alpha = alpha,
     foldid = dataset$enet_foldid,
-    type.measure = "deviance",
+    type.measure = "auc",
     standardize = FALSE,
     penalty.factor = penalty_factor,
     keep = TRUE
