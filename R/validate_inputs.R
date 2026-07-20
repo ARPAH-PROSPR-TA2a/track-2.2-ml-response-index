@@ -132,10 +132,15 @@
   for (covar in if (is.null(additional_covariates)) character(0) else additional_covariates) {
     col_data <- pheno[[covar]]
 
-    if (!is.numeric(col_data)) {
+    is_allowed_covar <- is.numeric(col_data) ||
+      is.integer(col_data) ||
+      is.factor(col_data) ||
+      is.logical(col_data)
+    
+    if (!is_allowed_covar) {
       stop(
-        "Additional covariate '", covar, "' must be numeric. ",
-        "Categorical covariates must be one-hot encoded before calling FAST_treatment_ML."
+        "Additional covariate '", covar, "' must be numeric, integer, factor, or logical. ",
+        "Character covariates are not accepted."
       )
     }
 
