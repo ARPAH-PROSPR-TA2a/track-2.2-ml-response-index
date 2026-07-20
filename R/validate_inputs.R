@@ -132,11 +132,18 @@
   for (covar in if (is.null(additional_covariates)) character(0) else additional_covariates) {
     col_data <- pheno[[covar]]
 
+    if (is.ordered(col_data)) {
+      stop(
+        "Additional covariate '", covar, "' must be an unordered factor. ",
+        "Ordered factors are not accepted because their default contrasts are polynomial."
+      )
+    }
+
     is_allowed_covar <- is.numeric(col_data) ||
       is.integer(col_data) ||
       is.factor(col_data) ||
       is.logical(col_data)
-    
+
     if (!is_allowed_covar) {
       stop(
         "Additional covariate '", covar, "' must be numeric, integer, factor, or logical. ",

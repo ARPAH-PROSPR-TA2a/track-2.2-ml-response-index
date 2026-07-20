@@ -24,10 +24,22 @@ Required columns:
 | `FEMALE` | Binary sex indicator, `0/1` |
 
 `additional_covariates`, when supplied, names extra phenotype columns used only
-as ENET training adjustment covariates. These columns must be numeric. Raw
-categorical covariates are not accepted; one-hot encode them upstream and pass
-the numeric indicator columns. `FEMALE` is added automatically and should not be
-listed in `additional_covariates`.
+as ENET training adjustment covariates. Numeric, integer, unordered factor, and
+logical columns are accepted. Character and ordered-factor columns are rejected.
+`FEMALE` is added automatically and should not be listed in
+`additional_covariates`.
+
+Unordered factors use treatment contrasts. For `k` observed levels, the first
+declared factor level is the reference and the other levels produce `k - 1`
+numeric columns. Logical columns use `FALSE` as the reference and produce one
+`<name>TRUE` column when both values are observed. Callers should construct
+factors with explicit `levels` or use `relevel()` when the reference category
+matters.
+
+Encoding is performed separately for each follow-up after unused factor levels
+are dropped. A factor with only one observed level in that follow-up is dropped
+with a message. Encoded model-matrix names are normalized with
+`make.names(..., unique = TRUE)` before the `covariate::` prefix is added.
 
 Rows missing requested additional covariates are removed before modeling.
 Subjects must have a baseline sample and at least one follow-up sample.
@@ -55,7 +67,7 @@ Model-ready feature sets:
 
 | Model | Training features | Deployment features |
 |:---|:---|:---|
-| ENET | Retained omics changes, retained `FEMALE`, retained numeric `additional_covariates` | Retained omics changes and retained `FEMALE` |
+| ENET | Retained omics changes, retained `FEMALE`, retained encoded `additional_covariates` | Retained omics changes and retained `FEMALE` |
 | XGB | Retained omics changes and retained `FEMALE` | Retained omics changes and retained `FEMALE` |
 
 All candidate features use training-only preprocessing: all-missing removal,
@@ -128,8 +140,10 @@ Feature names are prefixed:
 | `omics::` | Baseline-to-follow-up omics change |
 | `covariate::` | Preprocessed phenotype covariate |
 
-ENET receives retained omics features, retained `FEMALE`, and retained numeric
-additional covariates. Covariate columns are unpenalized in ENET.
+ENET receives retained omics features, retained `FEMALE`, and retained encoded
+additional covariates. Covariate columns are unpenalized in ENET. For example,
+a factor `site` with levels `A`, `B`, and `C` produces
+`covariate::siteB` and `covariate::siteC` when `A` is the reference.
 
 ### `data/FU*/xgb_train.csv.gz`
 
@@ -209,7 +223,9 @@ candidate omics feature or encoded covariate for each modeled follow-up.
 
 Rows removed before scaling have blank transformation values as appropriate. For
 deployment, inference uses retained rows with `DEPLOYABLE = TRUE` and the model
-flag set.
+flag set. Factor covariates appear as one row per encoded treatment-contrast
+column. A single-level factor produces no encoded column and therefore has no
+row in this table for that follow-up.
 
 ### `models/FU*/enet/metrics.csv`
 
@@ -219,7 +235,7 @@ One row per fitted ENET model.
 |:---|:---|
 | `CV_AUC` | Pooled out-of-fold AUC at `lambda.min` |
 | `INSAMPLE_AUC` | AUC on the training matrix |
-| `LAMBDA` | Selected `cv.glmnet()` `lambda.min` |
+| `LAMBDA` | `cv.glmnet()` `lambda.min`, selected using cross-validated AUC |
 | `LAMBDA_1SE` | `cv.glmnet()` one-standard-error lambda, recorded only |
 | `ALPHA` | Elastic-net mixing parameter |
 | `N_FEATURES` | Number of ENET matrix columns |

@@ -261,7 +261,7 @@
 
   train_cov <- train_pheno[, additional_covariates, drop = FALSE]
   combined <- train_cov
-  
+
   for (col in names(combined)) {
     if (col == "FEMALE") {
       combined[[col]] <- .as_binary_numeric(combined[[col]])
@@ -271,13 +271,13 @@
       combined[[col]] <- droplevels(combined[[col]])
     }
   }
-  
+
   single_level_factor <- vapply(
     combined,
     function(x) is.factor(x) && nlevels(x) < 2L,
     logical(1)
   )
-  
+
   if (any(single_level_factor)) {
     message(
       "Dropping single-level factor covariate(s) after follow-up filtering: ",
@@ -285,7 +285,7 @@
     )
     combined <- combined[, !single_level_factor, drop = FALSE]
   }
-  
+
   if (ncol(combined) == 0L) {
     train_mm <- matrix(numeric(0), nrow = nrow(train_cov), ncol = 0)
   } else {
