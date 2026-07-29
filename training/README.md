@@ -48,13 +48,32 @@ CV folds are subject-level and stratified by treatment. Each follow-up must have
 at least as many subjects in each treatment arm as the requested fold count.
 
 ENET receives omics changes, `FEMALE`, and every requested
-numeric `additional_covariates` variable as training-only adjustment features.
-XGB receives omics changes plus `FEMALE`; other covariates are excluded from
-XGB. If `FEMALE` has zero variance in the training set for a follow-up,
-preprocessing removes it from both models.
+`additional_covariates` variable as training-only adjustment features. Numeric,
+integer, unordered factor, and logical covariates are accepted. Character and
+ordered-factor covariates are rejected. XGB receives omics changes plus
+`FEMALE`; other covariates are excluded from XGB. If `FEMALE` has zero variance
+in the training set for a follow-up, preprocessing removes it from both models.
 
-Raw categorical covariates are not accepted. One-hot encode them upstream and
-pass the numeric indicator columns if they should be used for ENET adjustment.
+### Categorical Covariates
+
+Unordered factors are converted to treatment contrasts independently within
+each follow-up. A factor with `k` observed levels produces `k - 1` columns, with
+the first declared factor level as the reference. Set factor levels explicitly
+when the reference matters:
+
+```r
+pheno$site <- factor(pheno$site, levels = c("A", "B", "C"))
+```
+
+This produces `covariate::siteB` and `covariate::siteC`; level `A` is the
+reference. Logical covariates use `FALSE` as the reference and produce a
+`<name>TRUE` column. Unused factor levels are dropped for each follow-up, and a
+factor with only one observed level is dropped with a message.
+
+Encoded column names are normalized with `make.names(..., unique = TRUE)`.
+Categorical columns are centered and scaled like numeric covariates. They are
+unpenalized ENET adjustment features and are intentionally excluded from XGB
+and deployment scoring.
 
 Feature columns use `omics::` and `covariate::` prefixes.
 
@@ -84,8 +103,9 @@ success threshold.
 
 `glmnet::cv.glmnet()` fits a binomial elastic-net model. Omics coefficients are
 penalized; `FEMALE` and requested covariates are included with
-`penalty.factor = 0`. The final model uses `lambda.min`, selected by minimum
-cross-validated binomial deviance; out-of-fold AUC is reported at that lambda.
+`penalty.factor = 0`. The final model uses `lambda.min`, selected with
+cross-validated AUC (`type.measure = "auc"`); pooled out-of-fold AUC is reported
+at that lambda.
 Outputs include metrics, subject predictions, and coefficients sufficient to
 reproduce deployment predictions without a saved R model object. Deployment
 scoring omits training-only adjustment covariates, equivalent to setting their

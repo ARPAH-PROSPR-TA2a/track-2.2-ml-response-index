@@ -79,10 +79,36 @@ run_validation_tests <- function() {
     "phenotype validation returns the ML phenotype table"
   )
 
+  factor_validated <- suppressWarnings(
+    .validate_pheno(fixture$pheno, additional_covariates = "site")
+  )
+  .expect_true(
+    is.factor(factor_validated$site),
+    "unordered factor additional covariates are accepted"
+  )
+
+  logical_validated <- suppressWarnings(
+    .validate_pheno(fixture$pheno, additional_covariates = "smoker")
+  )
+  .expect_true(
+    is.logical(logical_validated$smoker),
+    "logical additional covariates are accepted"
+  )
+
+  character_pheno <- fixture$pheno
+  character_pheno$site <- as.character(character_pheno$site)
   .expect_error(
-    suppressWarnings(.validate_pheno(fixture$pheno, additional_covariates = "site")),
-    "Additional covariate 'site' must be numeric.",
-    "categorical additional covariates must be encoded before training"
+    suppressWarnings(.validate_pheno(character_pheno, additional_covariates = "site")),
+    "Additional covariate 'site' must be numeric, integer, factor, or logical.",
+    "character additional covariates are rejected"
+  )
+
+  ordered_pheno <- fixture$pheno
+  ordered_pheno$site <- ordered(ordered_pheno$site)
+  .expect_error(
+    suppressWarnings(.validate_pheno(ordered_pheno, additional_covariates = "site")),
+    "Additional covariate 'site' must be an unordered factor.",
+    "ordered factor additional covariates are rejected"
   )
 
   single_sex_pheno <- fixture$pheno
@@ -294,6 +320,78 @@ run_feature_tests <- function() {
       !any(startsWith(colnames(prepared$xgb_x_train), "covariate::age")),
     "XGB includes FEMALE by default and excludes other covariates"
   )
+
+  categorical_pheno <- fixture$pheno
+  categorical_pheno$site <- factor(
+    rep(c("A", "B", "C", "A", "B", "C", "A", "B"), each = 2L),
+    levels = c("A", "B", "C")
+  )
+  categorical_pheno$smoker <- rep(
+    rep(c(FALSE, TRUE), length.out = nrow(categorical_pheno) / 2L),
+    each = 2L
+  )
+  categorical <- .prepare_fu_change_dataset(
+    pheno_df = categorical_pheno,
+    omics_df = fixture$omics,
+    fu_level = 1L,
+    model_covariates = c("site", "smoker"),
+    enet_cv_folds = 2L,
+    xgb_cv_folds = 2L,
+    xgb_cv_repeats = 1L,
+    seed = 1L
+  )
+  expected_categorical <- c(
+    "covariate::FEMALE",
+    "covariate::siteB",
+    "covariate::siteC",
+    "covariate::smokerTRUE"
+  )
+  .expect_equal(
+    colnames(categorical$enet_x_train)[
+      startsWith(colnames(categorical$enet_x_train), "covariate::")
+    ],
+    expected_categorical,
+    "ENET uses treatment contrasts for factors and logical covariates"
+  )
+  .expect_equal(
+    categorical$preprocessing$FEATURE_NAME[
+      categorical$preprocessing$FEATURE_TYPE == "covariate"
+    ],
+    expected_categorical,
+    "preprocessing records encoded categorical columns in matrix order"
+  )
+  .expect_equal(
+    colnames(categorical$xgb_x_train)[
+      startsWith(colnames(categorical$xgb_x_train), "covariate::")
+    ],
+    "covariate::FEMALE",
+    "encoded additional covariates remain excluded from XGB"
+  )
+
+  single_level_pheno <- categorical_pheno
+  single_level_pheno$site <- factor(
+    ifelse(
+      as.integer(as.character(single_level_pheno$FU)) == 1L,
+      "A",
+      as.character(single_level_pheno$site)
+    ),
+    levels = c("A", "B", "C")
+  )
+  single_level <- suppressMessages(.prepare_fu_change_dataset(
+    pheno_df = single_level_pheno,
+    omics_df = fixture$omics,
+    fu_level = 1L,
+    model_covariates = "site",
+    enet_cv_folds = 2L,
+    xgb_cv_folds = 2L,
+    xgb_cv_repeats = 1L,
+    seed = 1L
+  ))
+  .expect_true(
+    !any(startsWith(colnames(single_level$enet_x_train), "covariate::site")) &&
+      !any(startsWith(single_level$preprocessing$FEATURE_NAME, "covariate::site")),
+    "single-level factors are dropped within each follow-up"
+  )
   .expect_true(
     {
       duplicate_female <- .prepare_fu_change_dataset(
@@ -483,7 +581,7 @@ run_end_to_end_tests <- function() {
     pheno = fixture$pheno,
     omics = fixture$omics,
     omics_type = "Proteomics",
-    additional_covariates = c("age", "bmi"),
+    additional_covariates = c("age", "bmi", "site", "smoker"),
     models = c("enet", "xgb"),
     output_dir = output_dir,
     enet_cv_folds = 5L,
@@ -549,11 +647,17 @@ run_end_to_end_tests <- function() {
   )
   .expect_true(
     any(startsWith(names(enet_train), "covariate::age")) &&
+      all(c(
+        "covariate::siteB", "covariate::siteC", "covariate::smokerTRUE"
+      ) %in% names(enet_train)) &&
       "covariate::FEMALE" %in% names(xgb_train) &&
       sum(startsWith(names(xgb_train), "covariate::FEMALE")) == 1L &&
       !any(startsWith(names(xgb_train), "covariate::age")) &&
       !any(grepl("[\\[\\]<]", names(xgb_train))),
     "model-ready matrices preserve feature boundaries and XGB-safe names"
+      !any(startsWith(names(xgb_train), "covariate::site")) &&
+      !any(startsWith(names(xgb_train), "covariate::smoker")),
+    "model-ready matrices preserve feature boundaries"
   )
   .expect_true(
     all(file.exists(unlist(manifest$reports, use.names = FALSE))),

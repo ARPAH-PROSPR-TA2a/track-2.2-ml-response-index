@@ -104,13 +104,13 @@ Important phenotype behavior:
 - `FU` must be consecutive integers starting at `0`.
 - `FEMALE` and `TREATMENT_GROUP` must be binary `0/1`.
 - Duplicate `SUBJECT_ID`/`FU` rows are reduced to the first row with a warning.
-- `additional_covariates` must be numeric.
+- `additional_covariates` may be numeric, integer, unordered factor, or logical.
+- Character and ordered-factor covariates are rejected.
 - Rows missing requested additional covariates are dropped.
 - Subjects without both baseline and at least one follow-up are dropped.
 
-Additional covariates are training-only ENET adjustment covariates. Raw
-categorical covariates are rejected; callers should one-hot encode them upstream
-if they want numeric indicators included.
+Additional covariates are training-only ENET adjustment covariates. Unordered
+factors and logicals are encoded automatically before numeric preprocessing.
 
 Omics validation requires `ANALYTE_NAME`, numeric sample columns, and overlap
 with validated phenotype sample IDs. After any DNAm probe restriction, analyte
@@ -157,8 +157,16 @@ Baseline omics levels are not model features.
 
 ## 4. Preprocessing
 
-Preprocessing is in `R/build_training_features.R`. Omics features and covariate
-features go through the same numeric sequence:
+Preprocessing is in `R/build_training_features.R`. Before the numeric sequence,
+unordered factor covariates are reduced to the levels observed in the current
+follow-up and passed through `model.matrix()` with treatment contrasts. The
+first declared level is the reference, so a `k`-level factor produces `k - 1`
+columns. Logical covariates are converted to factors with levels `FALSE`,
+`TRUE`. Single-level factors are dropped with a message. Encoded names are made
+syntactically valid and unique with `make.names()`.
+
+Omics features and encoded covariate features then go through the same numeric
+sequence:
 
 1. Drop all-missing training columns.
 2. Median-impute missing values.
@@ -189,7 +197,7 @@ ENET receives:
 ```text
 retained omics changes
 + retained FEMALE
-+ retained numeric additional_covariates
++ retained encoded additional_covariates
 ```
 
 XGB receives:
@@ -203,12 +211,18 @@ Feature names are prefixed:
 
 ```text
 omics::<INTERNAL_ANALYTE_NAME>
-covariate::<covariate name>
 ```
-
 User-facing reports preserve original analyte names through
 `models/reports/analyte_name_map.csv` and `ORIGINAL_FEATURE_NAME` columns where
 prefixed feature names are reported.
+
+```text
+covariate::<covariate name>
+```
+For example, `site = factor(..., levels = c("A", "B", "C"))` produces
+`covariate::siteB` and `covariate::siteC`. These encoded columns are recorded in
+the preprocessing report in model-matrix order.
+>>>>>>> origin/main
 
 `FEMALE` is added automatically to the model covariate list. If `FEMALE` has
 zero variance within a follow-up, preprocessing removes it from both model
@@ -247,7 +261,7 @@ glmnet::cv.glmnet(
   family = "binomial",
   alpha = 0.5,
   foldid = dataset$enet_foldid,
-  type.measure = "deviance",
+  type.measure = "auc",
   standardize = FALSE,
   penalty.factor = penalty_factor,
   keep = TRUE
@@ -263,9 +277,8 @@ Penalty factors:
 | Omics | `1` |
 | Covariates | `0` |
 
-`lambda.min` is selected by cross-validated binomial deviance. `CV_AUC` is then
-computed from out-of-fold predictions at `lambda.min`; AUC is reported but does
-not select the lambda.
+`lambda.min` is selected using cross-validated AUC. `CV_AUC` is computed from
+the pooled out-of-fold predictions at the selected lambda.
 
 The worker writes metrics, training-cohort predictions, and a compact
 `weights.csv` with the intercept, selected nonzero omics coefficients, and all
@@ -349,6 +362,6 @@ For exact JSON fields, see `training/INPUTS_OUTPUTS.md`.
 - All preprocessing parameters are learned within the follow-up training cohort.
 - Model matrix column order is defined by preprocessing rows.
 - XGB never receives additional covariates beyond retained `FEMALE`.
-- Additional covariates are numeric, ENET-only, and training-only for inference.
+- Additional covariates are encoded, ENET-only, and training-only for inference.
 - Export success is based on training `CV_AUC >= 0.8`; unsuccessful models are
   still exported and marked accordingly.
