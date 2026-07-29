@@ -184,10 +184,21 @@ analyte.
 |:---|:---|
 | `FU` | Follow-up modeled |
 | `TREATMENT_GROUP` | `0` or `1` |
-| `ANALYTE_NAME` | Omics feature |
+| `ANALYTE_NAME` | Original omics feature name |
 | `N_SUBJECTS` | Subjects in the treatment arm |
 | `N_NONMISSING` | Observed change values |
 | `MEAN`, `MEDIAN`, `SD`, `MIN`, `MAX` | Raw change-score statistics |
+
+### `models/reports/analyte_name_map.csv`
+
+Mapping between raw input analyte names and model-internal names. Internal names
+replace characters disallowed by XGBoost feature names (`[`, `]`, and `<`).
+
+| Column | Meaning |
+|:---|:---|
+| `ORIGINAL_ANALYTE_NAME` | Raw input `ANALYTE_NAME` |
+| `INTERNAL_ANALYTE_NAME` | Name used inside model matrices and feature names |
+| `WAS_MODIFIED` | Whether the internal name differs from the original |
 
 ### `models/reports/preprocessing.csv`
 
@@ -197,7 +208,7 @@ candidate omics feature or encoded covariate for each modeled follow-up.
 | Column | Meaning |
 |:---|:---|
 | `FU` | Follow-up modeled |
-| `FEATURE_NAME` | Prefixed model-matrix column name |
+| `FEATURE_NAME` | Prefixed internal model-matrix column name |
 | `FEATURE_TYPE` | `omics` or `covariate` |
 | `STATUS` | `retained`, `all_missing_training`, or `zero_variance_training` |
 | `MEDIAN` | Training-set imputation median |
@@ -206,6 +217,7 @@ candidate omics feature or encoded covariate for each modeled follow-up.
 | `IN_ENET` | Whether the ENET training matrix contains the feature |
 | `IN_XGB` | Whether the XGB training matrix contains the feature |
 | `DEPLOYABLE` | Whether inference uses the feature on future datasets |
+| `ORIGINAL_FEATURE_NAME` | Prefixed feature name with original omics analyte names |
 
 Rows removed before scaling have blank transformation values as appropriate. For
 deployment, inference uses retained rows with `DEPLOYABLE = TRUE` and the model
@@ -235,6 +247,7 @@ Scoring table for ENET.
 | `FEATURE_NAME` | `(Intercept)` or prefixed feature name |
 | `WEIGHT` | Fitted coefficient at `LAMBDA` |
 | `FEATURE_TYPE` | `intercept`, `omics`, or `covariate` |
+| `ORIGINAL_FEATURE_NAME` | Prefixed feature name with original omics analyte names |
 
 This file includes the intercept, selected nonzero omics coefficients, and all
 unpenalized covariate coefficients.
@@ -262,6 +275,7 @@ Gain-based XGBoost feature importance.
 | `FEATURE_NAME` | Prefixed feature name |
 | `GAIN` | XGBoost gain importance |
 | `FEATURE_TYPE` | `omics` or `covariate` |
+| `ORIGINAL_FEATURE_NAME` | Prefixed feature name with original omics analyte names |
 
 ### `models/FU*/xgb/tuning.csv`
 

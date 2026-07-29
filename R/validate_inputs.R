@@ -304,5 +304,82 @@
     message("DNAm: restricted analysis to ", nrow(omics_df), " reliable probes.")
   }
 
-  list(pheno = pheno_df, omics = omics_df)
+  analyte_map <- .make_xgb_safe_analyte_map(omics_df$ANALYTE_NAME)
+  omics_df$ANALYTE_NAME <- analyte_map$INTERNAL_ANALYTE_NAME
+
+  list(
+    pheno = pheno_df,
+    omics = omics_df,
+    analyte_name_map = analyte_map
+  )
+}
+
+
+.make_xgb_safe_analyte_map <- function(analyte_names) {
+  analyte_names <- as.character(analyte_names)
+  
+  internal <- janitor::make_clean_names(
+    analyte_names,
+    case = "snake",
+    ascii = TRUE,
+    allow_dupes = FALSE
+  )
+
+  if (anyDuplicated(internal)) {
+    stop(
+      "XGB-safe analyte-name mapping is not one-to-one. ",
+      "Please resolve duplicate analyte names after sanitization."
+    )
+  }
+
+  data.frame(
+    ORIGINAL_ANALYTE_NAME = analyte_names,
+    INTERNAL_ANALYTE_NAME = internal,
+    WAS_MODIFIED = internal != analyte_names,
+    stringsAsFactors = FALSE
+  )
+}
+
+.apply_analyte_map_to_omics <- function(omics_df, analyte_map) {
+  idx <- match(omics_df$ANALYTE_NAME, analyte_map$ORIGINAL_ANALYTE_NAME)
+  omics_df$ANALYTE_NAME[!is.na(idx)] <- analyte_map$INTERNAL_ANALYTE_NAME[idx[!is.na(idx)]]
+  omics_df
+}
+
+.restore_original_analyte_name <- function(df, analyte_map,
+                                           analyte_col = "ANALYTE_NAME") {
+  if (is.null(analyte_map) || nrow(analyte_map) == 0L ||
+      !analyte_col %in% names(df)) {
+    return(df)
+  }
+
+  idx <- match(df[[analyte_col]], analyte_map$INTERNAL_ANALYTE_NAME)
+  mapped <- !is.na(idx)
+  df[[analyte_col]][mapped] <- analyte_map$ORIGINAL_ANALYTE_NAME[idx[mapped]]
+  df
+}
+
+.add_original_feature_name <- function(df, analyte_map,
+                                       feature_col = "FEATURE_NAME") {
+  if (is.null(analyte_map) || nrow(analyte_map) == 0L ||
+      !feature_col %in% names(df)) {
+    return(df)
+  }
+
+  feature_names <- df[[feature_col]]
+  original_feature_names <- feature_names
+
+  is_omics <- startsWith(feature_names, "omics::")
+  internal_analytes <- sub("^omics::", "", feature_names[is_omics])
+  idx <- match(internal_analytes, analyte_map$INTERNAL_ANALYTE_NAME)
+  mapped <- !is.na(idx)
+
+  omics_positions <- which(is_omics)
+  original_feature_names[omics_positions[mapped]] <- paste0(
+    "omics::",
+    analyte_map$ORIGINAL_ANALYTE_NAME[idx[mapped]]
+  )
+
+  df$ORIGINAL_FEATURE_NAME <- original_feature_names
+  df
 }

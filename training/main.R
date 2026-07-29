@@ -83,6 +83,7 @@ FAST_treatment_ML <- function(pheno,
   manifest <- .run_ml_disk(
     pheno_df = inputs$pheno,
     omics_df = inputs$omics,
+    analyte_name_map = inputs$analyte_name_map,
     additional_covariates = additional_covariates,
     model_covariates = model_covariates,
     models = models,

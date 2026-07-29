@@ -50,7 +50,8 @@
 }
 
 
-.run_enet_worker <- function(dataset, out_dir, data_out_dir, seed = 1L, alpha = 0.5) {
+.run_enet_worker <- function(dataset, out_dir, data_out_dir, seed = 1L,
+                             alpha = 0.5, analyte_name_map = NULL) {
   if (!requireNamespace("glmnet", quietly = TRUE)) {
     stop("Package 'glmnet' is required for ENET models.")
   }
@@ -79,7 +80,7 @@
 
   lambda <- cv_fit$lambda.min
   lambda_idx <- which.min(abs(cv_fit$lambda - lambda))
-  cv_auc <- .safe_auc(dataset$y_train, cv_fit$fit.preval[, lambda_idx])
+  cv_auc <- as.numeric(cv_fit$cvm[lambda_idx])
 
   fit <- cv_fit$glmnet.fit
   train_pred <- as.numeric(predict(fit, newx = dataset$enet_x_train, s = lambda, type = "response"))
@@ -103,6 +104,7 @@
     drop = FALSE
   ]
   row.names(weights) <- NULL
+  weights <- .add_original_feature_name(weights, analyte_name_map)
 
   metrics <- data.frame(
     CV_AUC = cv_auc,
@@ -139,7 +141,8 @@
 
 
 .run_xgb_worker <- function(fu_dir, out_dir, data_out_dir, python_bin = "python3",
-                            n_trials = 50L, seed = 1L, n_cores = 1L) {
+                            n_trials = 50L, seed = 1L, n_cores = 1L,
+                            analyte_name_map = NULL) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(data_out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -158,13 +161,20 @@
     stop("XGB worker failed with exit status ", status, ".")
   }
 
-  list(
+  paths <- list(
     metrics = file.path(out_dir, "metrics.csv"),
     predictions = file.path(data_out_dir, "predictions.csv"),
     importance = file.path(out_dir, "importance.csv"),
     tuning = file.path(out_dir, "tuning.csv"),
     model = file.path(out_dir, "model.json")
   )
+
+  if (!is.null(analyte_name_map) && file.exists(paths$importance)) {
+    importance <- read.csv(paths$importance, stringsAsFactors = FALSE)
+    .write_csv(.add_original_feature_name(importance, analyte_name_map), paths$importance)
+  }
+
+  paths
 }
 
 
@@ -172,6 +182,7 @@
                          model_covariates = "FEMALE",
                          models = c("enet", "xgb"), output_dir,
                          omics_type = NULL,
+                         analyte_name_map = NULL,
                          enet_cv_folds = 10L,
                          xgb_cv_folds = 10L, xgb_cv_repeats = 3L, seed = 1L,
                          n_cores = 1L, python_bin = "python3",
@@ -197,7 +208,8 @@
     reports = list(
       cohort = file.path(models_dir, "reports", "cohort.csv"),
       change_summary = file.path(models_dir, "reports", "change_summary.csv"),
-      preprocessing = file.path(models_dir, "reports", "preprocessing.csv")
+      preprocessing = file.path(models_dir, "reports", "preprocessing.csv"),
+      analyte_name_map = file.path(models_dir, "reports", "analyte_name_map.csv")
     ),
     followups = list()
   )
@@ -250,8 +262,14 @@
 
     .write_prepared_dataset(prepared, fu_data_dir)
     report_tables$cohort[[fu_key]] <- prepared$cohort
-    report_tables$change_summary[[fu_key]] <- prepared$change_summary
-    report_tables$preprocessing[[fu_key]] <- prepared$preprocessing
+    report_tables$change_summary[[fu_key]] <- .restore_original_analyte_name(
+      prepared$change_summary,
+      analyte_name_map
+    )
+    report_tables$preprocessing[[fu_key]] <- .add_original_feature_name(
+      prepared$preprocessing,
+      analyte_name_map
+    )
     message(
       fu_key, ": prepared ", length(prepared$subject_ids_train), " training subjects."
     )
@@ -274,7 +292,8 @@
         prepared,
         out_dir = file.path(fu_model_dir, "enet"),
         data_out_dir = file.path(fu_data_dir, "enet"),
-        seed = seed + fu_level
+        seed = seed + fu_level,
+        analyte_name_map = analyte_name_map
       )
       message(fu_key, ": ENET complete.")
     }
@@ -290,7 +309,8 @@
         python_bin = python_bin,
         n_trials = xgb_n_trials,
         seed = seed + fu_level,
-        n_cores = n_cores
+        n_cores = n_cores,
+        analyte_name_map = analyte_name_map
       )
       message(fu_key, ": XGB complete.")
     }
@@ -300,6 +320,9 @@
 
   reports_dir <- file.path(models_dir, "reports")
   dir.create(reports_dir, recursive = TRUE, showWarnings = FALSE)
+  if (!is.null(analyte_name_map)) {
+    .write_csv(analyte_name_map, manifest$reports$analyte_name_map)
+  }
   for (report_name in names(report_tables)) {
     if (length(report_tables[[report_name]]) > 0L) {
       .write_csv(

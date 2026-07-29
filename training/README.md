@@ -119,6 +119,7 @@ output_dir/
       cohort.csv
       change_summary.csv
       preprocessing.csv
+      analyte_name_map.csv
     FU1/
       enet/
         metrics.csv
@@ -146,10 +147,11 @@ stores every repeated XGB fold assignment. These subject-level artifacts are
 written under `data/`.
 Reports under `models/reports/` stack information across follow-ups:
 `cohort.csv` records modeled cohort counts, `change_summary.csv` describes raw
-change scores by treatment arm, and `preprocessing.csv` audits feature
+change scores by treatment arm, `preprocessing.csv` audits feature
 transformations and removals while recording the preprocessing recipe needed to
-reconstruct model matrices. Run settings and artifact paths are stored once in
-`manifest.json`.
+reconstruct model matrices, and `analyte_name_map.csv` records original analyte
+names and internal XGB-safe names. Run settings and artifact paths are stored
+once in `manifest.json`.
 
 Exported model JSON packages contain the model-specific preprocessing recipe,
 training metrics, covariates, a `successful` flag, and either ENET weights or
