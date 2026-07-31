@@ -153,20 +153,22 @@ run_validation_tests <- function() {
     "omics validation returns the ML omics table"
   )
 
-  safe_map <- .make_xgb_safe_analyte_map(c("plain_name", "metab[1]", "metab<2>"))
+  safe_map <- .make_xgb_safe_analyte_map(c("plain_name", "metab[1]", "metab<2>", "IL[6]", "IL 6"))
   .expect_true(
     identical(
       names(safe_map),
       c("ORIGINAL_ANALYTE_NAME", "INTERNAL_ANALYTE_NAME", "WAS_MODIFIED")
     ) &&
       identical(safe_map$INTERNAL_ANALYTE_NAME[1], "plain_name") &&
-      safe_map$INTERNAL_ANALYTE_NAME[2] == "metab__XGB_LB__1__XGB_RB__" &&
-      safe_map$INTERNAL_ANALYTE_NAME[3] == "metab__XGB_LT__2>" &&
-      identical(safe_map$WAS_MODIFIED, c(FALSE, TRUE, TRUE)),
+      safe_map$INTERNAL_ANALYTE_NAME[2] == "metab_1_" &&
+      safe_map$INTERNAL_ANALYTE_NAME[3] == "metab_2>" &&
+      safe_map$INTERNAL_ANALYTE_NAME[4] == "IL_6_" &&
+      safe_map$INTERNAL_ANALYTE_NAME[5] == "IL 6" &&
+      identical(safe_map$WAS_MODIFIED, c(FALSE, TRUE, TRUE, TRUE, FALSE)),
     "XGB-safe analyte map only changes forbidden feature-name characters"
   )
   .expect_error(
-    .make_xgb_safe_analyte_map(c("metab[1]", "metab__XGB_LB__1__XGB_RB__")),
+    .make_xgb_safe_analyte_map(c("metab[1]", "metab_1_")),
     "XGB-safe analyte-name mapping is not one-to-one.",
     "XGB-safe analyte map rejects collisions after sanitization"
   )
@@ -653,11 +655,10 @@ run_end_to_end_tests <- function() {
       "covariate::FEMALE" %in% names(xgb_train) &&
       sum(startsWith(names(xgb_train), "covariate::FEMALE")) == 1L &&
       !any(startsWith(names(xgb_train), "covariate::age")) &&
+      !any(startsWith(names(xgb_train), "covariate::site")) &&
+      !any(startsWith(names(xgb_train), "covariate::smoker")) &&
       !any(grepl("[\\[\\]<]", names(xgb_train))),
     "model-ready matrices preserve feature boundaries and XGB-safe names"
-      !any(startsWith(names(xgb_train), "covariate::site")) &&
-      !any(startsWith(names(xgb_train), "covariate::smoker")),
-    "model-ready matrices preserve feature boundaries"
   )
   .expect_true(
     all(file.exists(unlist(manifest$reports, use.names = FALSE))),

@@ -324,13 +324,9 @@
 
 .make_xgb_safe_analyte_map <- function(analyte_names) {
   analyte_names <- as.character(analyte_names)
-  
-  internal <- janitor::make_clean_names(
-    analyte_names,
-    case = "snake",
-    ascii = TRUE,
-    allow_dupes = FALSE
-  )
+  internal <- analyte_names
+
+  internal <- gsub("\\[|\\]|<", "_", internal)
 
   if (anyDuplicated(internal)) {
     stop(

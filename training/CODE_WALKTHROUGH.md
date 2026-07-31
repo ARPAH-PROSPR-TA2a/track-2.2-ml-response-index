@@ -114,7 +114,7 @@ factors and logicals are encoded automatically before numeric preprocessing.
 
 Omics validation requires `ANALYTE_NAME`, numeric sample columns, and overlap
 with validated phenotype sample IDs. After any DNAm probe restriction, analyte
-names are mapped to internal XGB-safe names by replacing `[`, `]`, and `<` when
+names are mapped to internal XGB-safe names by replacing `[`, `]`, and `<` with `_` when
 needed. Missing values and near-zero variance are reported here, but the actual
 imputation and filtering happen per follow-up.
 
@@ -211,18 +211,16 @@ Feature names are prefixed:
 
 ```text
 omics::<INTERNAL_ANALYTE_NAME>
+covariate::<covariate name>
 ```
+
 User-facing reports preserve original analyte names through
 `models/reports/analyte_name_map.csv` and `ORIGINAL_FEATURE_NAME` columns where
 prefixed feature names are reported.
 
-```text
-covariate::<covariate name>
-```
 For example, `site = factor(..., levels = c("A", "B", "C"))` produces
 `covariate::siteB` and `covariate::siteC`. These encoded columns are recorded in
 the preprocessing report in model-matrix order.
->>>>>>> origin/main
 
 `FEMALE` is added automatically to the model covariate list. If `FEMALE` has
 zero variance within a follow-up, preprocessing removes it from both model

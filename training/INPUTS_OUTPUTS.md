@@ -206,7 +206,7 @@ analyte.
 ### `models/reports/analyte_name_map.csv`
 
 Mapping between raw input analyte names and model-internal names. Internal names
-replace characters disallowed by XGBoost feature names (`[`, `]`, and `<`).
+replace characters disallowed by XGBoost feature names (`[`, `]`, and `<`) with `_`.
 
 | Column | Meaning |
 |:---|:---|
