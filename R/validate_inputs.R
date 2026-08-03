@@ -369,8 +369,14 @@
     return(df)
   }
 
-  feature_names <- df[[feature_col]]
+  feature_names <- as.character(df[[feature_col]])
+  df[[feature_col]] <- feature_names
   original_feature_names <- feature_names
+  
+  if (length(feature_names) == 0L) {
+    df$ORIGINAL_FEATURE_NAME <- character(0)
+    return(df)
+  }
 
   is_omics <- startsWith(feature_names, "omics::")
   internal_analytes <- sub("^omics::", "", feature_names[is_omics])
