@@ -113,8 +113,10 @@ Additional covariates are training-only ENET adjustment covariates. Unordered
 factors and logicals are encoded automatically before numeric preprocessing.
 
 Omics validation requires `ANALYTE_NAME`, numeric sample columns, and overlap
-with validated phenotype sample IDs. Missing values and near-zero variance are
-reported here, but the actual imputation and filtering happen per follow-up.
+with validated phenotype sample IDs. After any DNAm probe restriction, analyte
+names are mapped to internal XGB-safe names by replacing `[`, `]`, and `<` with `_` when
+needed. Missing values and near-zero variance are reported here, but the actual
+imputation and filtering happen per follow-up.
 
 ## 2. Follow-Up Loop
 
@@ -208,9 +210,13 @@ retained omics changes
 Feature names are prefixed:
 
 ```text
-omics::<ANALYTE_NAME>
+omics::<INTERNAL_ANALYTE_NAME>
 covariate::<covariate name>
 ```
+
+User-facing reports preserve original analyte names through
+`models/reports/analyte_name_map.csv` and `ORIGINAL_FEATURE_NAME` columns where
+prefixed feature names are reported.
 
 For example, `site = factor(..., levels = c("A", "B", "C"))` produces
 `covariate::siteB` and `covariate::siteC`. These encoded columns are recorded in

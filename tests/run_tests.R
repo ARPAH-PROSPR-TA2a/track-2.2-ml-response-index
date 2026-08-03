@@ -153,6 +153,26 @@ run_validation_tests <- function() {
     "omics validation returns the ML omics table"
   )
 
+  safe_map <- .make_xgb_safe_analyte_map(c("plain_name", "metab[1]", "metab<2>", "IL[6]", "IL 6"))
+  .expect_true(
+    identical(
+      names(safe_map),
+      c("ORIGINAL_ANALYTE_NAME", "INTERNAL_ANALYTE_NAME", "WAS_MODIFIED")
+    ) &&
+      identical(safe_map$INTERNAL_ANALYTE_NAME[1], "plain_name") &&
+      safe_map$INTERNAL_ANALYTE_NAME[2] == "metab_1_" &&
+      safe_map$INTERNAL_ANALYTE_NAME[3] == "metab_2>" &&
+      safe_map$INTERNAL_ANALYTE_NAME[4] == "IL_6_" &&
+      safe_map$INTERNAL_ANALYTE_NAME[5] == "IL 6" &&
+      identical(safe_map$WAS_MODIFIED, c(FALSE, TRUE, TRUE, TRUE, FALSE)),
+    "XGB-safe analyte map only changes forbidden feature-name characters"
+  )
+  .expect_error(
+    .make_xgb_safe_analyte_map(c("metab[1]", "metab_1_")),
+    "XGB-safe analyte-name mapping is not one-to-one.",
+    "XGB-safe analyte map rejects collisions after sanitization"
+  )
+
   .expect_error(
     .validate_ml_args(
       models = "xgb",
@@ -553,6 +573,7 @@ run_end_to_end_tests <- function() {
   cat("===================\n")
 
   fixture <- .make_simulated_fixture(followups = 1:2)
+  fixture$omics$ANALYTE_NAME[1:3] <- c("protein[1]", "protein<2>", "protein]3")
   output_dir <- file.path(getwd(), "tests", "test_outputs", "track22_integration")
   if (dir.exists(output_dir)) {
     unlink(output_dir, recursive = TRUE)
@@ -610,6 +631,7 @@ run_end_to_end_tests <- function() {
   cohort <- read.csv(manifest$reports$cohort, stringsAsFactors = FALSE)
   change_summary <- read.csv(manifest$reports$change_summary, stringsAsFactors = FALSE)
   preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
+  analyte_name_map <- read.csv(manifest$reports$analyte_name_map, stringsAsFactors = FALSE)
 
   .expect_true(
     identical(names(subjects), c("SUBJECT_ID", "FU", "TREATMENT_GROUP", "ENET_FOLD_ID")) &&
@@ -634,8 +656,9 @@ run_end_to_end_tests <- function() {
       sum(startsWith(names(xgb_train), "covariate::FEMALE")) == 1L &&
       !any(startsWith(names(xgb_train), "covariate::age")) &&
       !any(startsWith(names(xgb_train), "covariate::site")) &&
-      !any(startsWith(names(xgb_train), "covariate::smoker")),
-    "model-ready matrices preserve feature boundaries"
+      !any(startsWith(names(xgb_train), "covariate::smoker")) &&
+      !any(grepl("[\\[\\]<]", names(xgb_train))),
+    "model-ready matrices preserve feature boundaries and XGB-safe names"
   )
   .expect_true(
     all(file.exists(unlist(manifest$reports, use.names = FALSE))),
@@ -676,7 +699,7 @@ run_end_to_end_tests <- function() {
       names(preprocessing),
       c(
         "FU", "FEATURE_NAME", "FEATURE_TYPE", "STATUS", "MEDIAN", "CENTER",
-        "SCALE", "IN_ENET", "IN_XGB", "DEPLOYABLE"
+        "SCALE", "IN_ENET", "IN_XGB", "DEPLOYABLE", "ORIGINAL_FEATURE_NAME"
       )
     ) &&
       identical(sort(unique(preprocessing$FU)), 1:2) &&
@@ -689,6 +712,17 @@ run_end_to_end_tests <- function() {
         ))
       ),
     "preprocessing CSV audits retained and removed model features"
+  )
+  .expect_true(
+    identical(
+      names(analyte_name_map),
+      c("ORIGINAL_ANALYTE_NAME", "INTERNAL_ANALYTE_NAME", "WAS_MODIFIED")
+    ) &&
+      any(analyte_name_map$WAS_MODIFIED) &&
+      all(c("protein[1]", "protein<2>", "protein]3") %in%
+            change_summary$ANALYTE_NAME) &&
+      any(preprocessing$FEATURE_NAME != preprocessing$ORIGINAL_FEATURE_NAME),
+    "reports preserve original analyte names alongside internal XGB-safe names"
   )
   .expect_true(
     all(preprocessing$DEPLOYABLE[
@@ -748,7 +782,7 @@ run_end_to_end_tests <- function() {
   .expect_true(
     identical(
       names(enet_weights),
-      c("FEATURE_NAME", "WEIGHT", "FEATURE_TYPE")
+      c("FEATURE_NAME", "WEIGHT", "FEATURE_TYPE", "ORIGINAL_FEATURE_NAME")
     ) &&
       all(
         names(enet_train)[startsWith(names(enet_train), "covariate::")] %in%

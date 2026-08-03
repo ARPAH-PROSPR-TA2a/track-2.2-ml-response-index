@@ -98,7 +98,9 @@ inputs <- .prepare_inputs(
 
 This uses the same validation path as training. Inference additionally depends
 on observed `TREATMENT_GROUP`, because validation statistics require labels.
-Training-only `additional_covariates` are not required for inference.
+Training-only `additional_covariates` are not required for inference. Raw
+analyte names are mapped to the same internal XGB-safe form used during
+training before the model matrix is rebuilt.
 
 ### Step 3: Rebuild the Model Matrix
 
