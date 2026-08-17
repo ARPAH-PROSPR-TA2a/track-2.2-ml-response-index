@@ -2,9 +2,12 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
   cat("\nInference Equivalence\n")
   cat("=====================\n")
 
-  exported <- FAST_export_models(
-    manifest,
-    output_dir = file.path(dirname(manifest$manifest_path), "exported_models")
+  export_messages <- capture.output(
+    exported <- FAST_export_models(
+      manifest,
+      output_dir = file.path(dirname(manifest$manifest_path), "exported_models")
+    ),
+    type = "message"
   )
   .expect_true(
     nrow(exported$models) == sum(vapply(manifest$followups, function(fu_manifest) {
@@ -14,41 +17,50 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
       all(exported$models$SUCCESSFUL ==
             (exported$models$TRAINING_CV_AUC >= 0.8)) &&
       all(file.exists(exported$models$PATH)) &&
-      file.exists(exported$manifest),
-    "model JSON packages are exported with success flags"
+      file.exists(exported$manifest) &&
+      any(grepl("Model export complete:", export_messages, fixed = TRUE)),
+    "model JSON packages are exported with success flags and a completion message"
   )
 
   evaluated_models <- list()
   unlink(exported$manifest)
-  bulk <- suppressWarnings(FAST_bulk_evaluate(
-    pheno = fixture$pheno,
-    omics = fixture$omics,
-    models_dir = exported$output_dir,
-    output_dir = file.path(dirname(manifest$manifest_path), "bulk_evaluation")
-  ))
+  bulk_messages <- capture.output(
+    bulk <- suppressWarnings(FAST_bulk_evaluate(
+      pheno = fixture$pheno,
+      omics = fixture$omics,
+      models_dir = exported$output_dir,
+      output_dir = file.path(dirname(manifest$manifest_path), "bulk_evaluation")
+    )),
+    type = "message"
+  )
   .expect_true(
     nrow(bulk$validation) == sum(exported$models$SUCCESSFUL) &&
       all(bulk$validation$SUCCESSFUL) &&
       !file.exists(exported$manifest) &&
       file.exists(bulk$output_files$validation_summary) &&
       all(file.exists(file.path(dirname(bulk$output_files$validation_summary), bulk$validation$PREDICTIONS_PATH))) &&
-      all(file.exists(file.path(dirname(bulk$output_files$validation_summary), bulk$validation$VALIDATION_PATH))),
-    "bulk evaluation scores successful model packages without an export index"
+      all(file.exists(file.path(dirname(bulk$output_files$validation_summary), bulk$validation$VALIDATION_PATH))) &&
+      sum(grepl("samples shared between omics and pheno", bulk_messages, fixed = TRUE)) <= 1L &&
+      any(grepl("Cross-trial validation complete:", bulk_messages, fixed = TRUE)),
+    "bulk evaluation does not repeat input diagnostics and ends with a completion message"
   )
 
   for (export_index in seq_len(nrow(exported$models))) {
     exported_model <- exported$models[export_index, , drop = FALSE]
-    evaluated <- suppressWarnings(FAST_evaluate(
-      pheno = fixture$pheno,
-      omics = fixture$omics,
-      model_path = exported_model$PATH,
-      output_dir = file.path(
-        dirname(manifest$manifest_path),
-        "single_model_evaluation",
-        exported_model$MODEL_ID
-      ),
-      return_matrix = TRUE
-    ))
+    evaluation_messages <- capture.output(
+      evaluated <- suppressWarnings(FAST_evaluate(
+        pheno = fixture$pheno,
+        omics = fixture$omics,
+        model_path = exported_model$PATH,
+        output_dir = file.path(
+          dirname(manifest$manifest_path),
+          "single_model_evaluation",
+          exported_model$MODEL_ID
+        ),
+        return_matrix = TRUE
+      )),
+      type = "message"
+    )
     evaluated_models[[exported_model$MODEL_ID]] <- evaluated
     fu_key <- paste0("FU", exported_model$FU)
     fu_manifest <- manifest$followups[[fu_key]]
@@ -101,8 +113,13 @@ run_inference_equivalence_tests <- function(fixture, manifest) {
       evaluated$validation$SUCCESSFUL == exported_model$SUCCESSFUL &&
         evaluated$validation$SUCCESS_AUC_THRESHOLD == 0.8 &&
         file.exists(evaluated$output_files$predictions) &&
-        file.exists(evaluated$output_files$validation),
-      paste(exported_model$MODEL_ID, "single-model package validation outputs are written")
+        file.exists(evaluated$output_files$validation) &&
+        any(grepl(
+          paste("Validation complete for", exported_model$MODEL_ID),
+          evaluation_messages,
+          fixed = TRUE
+        )),
+      paste(exported_model$MODEL_ID, "single-model outputs include a completion message")
     )
     .expect_equal(
       evaluated$validation$TRAINING_CV_AUC,

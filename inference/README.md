@@ -1,43 +1,85 @@
-# FAST Treatment ML Inference
+# FAST Treatment ML Cross-Trial Validation
 
-Inference scores exported FAST treatment models on a labeled cohort and reports validation against observed treatment status. It uses the same input validation, omics change definition, feature naming, and training-derived preprocessing recipe as the training pipeline, but only deployable features are required: omics changes and retained `FEMALE`. Training-only ENET adjustment covariates are not required on future datasets.
+Cross-trial validation is a separate Track 2.2 tool. It takes an exported model,
+applies it to another labeled trial, and reports how well the
+treatment-associated signal transfers. It does not refit or tune the model.
 
-Run from the repository root:
+The validation trial uses the same `pheno` and `omics` table layout as training.
+Its phenotype table must include observed `TREATMENT_GROUP` labels. Additional
+covariates used to adjust ENET during training are not needed here.
 
-``` r
+Run commands from the repository root.
+
+## Validate Every Successful Model
+
+Use this when evaluating a directory of exported models:
+
+```r
+source(file.path("inference", "main.R"))
+
+validation <- FAST_bulk_evaluate(
+  pheno = trial_b_pheno,
+  omics = trial_b_omics,
+  models_dir = "runs/trial_a_treatment_ml/models/exported_models",
+  output_dir = "runs/trial_a_on_trial_b"
+)
+
+read.csv(validation$output_files$validation_summary)
+```
+
+`FAST_bulk_evaluate()` finds the exported model packages in `models_dir` and,
+by default, evaluates those whose training CV AUC was at least 0.8. It writes:
+
+- `validation_summary.csv`, with one row per evaluated model; and
+- a `models/<MODEL_ID>/` directory containing that model's predictions and
+  validation result.
+
+If no exported model passed the training threshold, the summary is still
+written with the expected columns but has zero rows.
+
+## Validate One Model
+
+Use `FAST_evaluate()` when you want to inspect one exported JSON package:
+
+```r
 source(file.path("inference", "main.R"))
 
 result <- FAST_evaluate(
-  pheno = pheno,
-  omics = omics,
+  pheno = trial_b_pheno,
+  omics = trial_b_omics,
   model_path = "runs/trial_a_treatment_ml/models/exported_models/model_id.json",
-  output_dir = "runs/trial_a_on_trial_b"
+  output_dir = "runs/trial_a_on_trial_b/model_id"
 )
+
+result$validation
 ```
 
-`FAST_evaluate()` evaluates one self-contained JSON model package emitted by `FAST_export_models()`. `pheno` must include observed `TREATMENT_GROUP` labels.
+The result includes one probability per subject and a one-row validation
+summary. The summary reports the new trial's AUC and the association between the
+model score and observed treatment status. Exact columns and statistical details
+are in the [input/output reference](INPUTS_OUTPUTS.md).
 
-To evaluate every successful model package in a directory:
+## Requirements and Help
 
-``` r
-bulk <- FAST_bulk_evaluate(
-  pheno = pheno,
-  omics = omics,
-  models_dir = "runs/trial_a_treatment_ml/models/exported_models",
-  output_dir = "runs/trial_a_bulk_on_trial_b"
-)
+Validation runs entirely in R. ENET validation needs `jsonlite` and `pROC`;
+XGBoost validation also needs the R `xgboost` package. It does not use the
+Python environment that trained XGBoost.
+
+To check those R packages before loading data:
+
+```r
+source(file.path("inference", "main.R"))
+FAST_check_R("validation")
 ```
 
-Bulk evaluation scans the directory for exported model JSON packages, evaluates only packages with `successful == true`, writes per-model predictions/validation files, and writes a shareable `validation_summary.csv`.
-
-Validation uses the training success threshold `TRAINING_CV_AUC >= 0.8`. For successful models, inference reports validation AUC and the logistic association:
-
-``` text
-TREATMENT_GROUP ~ PREDICTED_PROB
-```
+See the root [requirements](../README.md#requirements) and
+[troubleshooting guide](../README.md#troubleshooting) for setup help. For exact
+input columns, output files, and model-package behavior, use the documents
+below.
 
 ## Documentation
 
--   [Input and output schemas](INPUTS_OUTPUTS.md)
--   [Code walkthrough](CODE_WALKTHROUGH.md)
--   [Training inputs and outputs](../training/INPUTS_OUTPUTS.md)
+- [Input and output reference](INPUTS_OUTPUTS.md)
+- [Code walkthrough](CODE_WALKTHROUGH.md)
+- [Training overview](../training/README.md)
+- [Training inputs and outputs](../training/INPUTS_OUTPUTS.md)

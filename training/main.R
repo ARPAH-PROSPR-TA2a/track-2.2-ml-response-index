@@ -1,6 +1,124 @@
+source(file.path("R", "check_environment.R"))
 source(file.path("R", "validate_inputs.R"))
 source(file.path("R", "build_training_features.R"))
 source(file.path("R", "write_training_artifacts.R"))
+
+
+.python_setup_help <- function() {
+  paste(
+    "What to do next:",
+    "  1. In a terminal, run `which python3` and `which python`.",
+    "     On Windows, run `where python`.",
+    "  2. Copy the path for the Python you intend to use, then run:",
+    "     FAST_check_python(\"/full/path/to/python\")",
+    "  3. Open the Troubleshooting section in README.md for setup help.",
+    sep = "\n"
+  )
+}
+
+
+FAST_check_python <- function(python_bin = NULL) {
+  if (is.null(python_bin)) {
+    python_bin <- "python3"
+  }
+  if (!is.character(python_bin) || length(python_bin) != 1L ||
+      is.na(python_bin) || !nzchar(python_bin)) {
+    stop("python_bin must be one non-empty character string.", call. = FALSE)
+  }
+
+  supplied_path <- grepl("[/\\\\]", python_bin)
+  # Expand `~`, but do not resolve symlinks: a venv's Python may be a symlink.
+  python_command <- if (supplied_path) path.expand(python_bin) else python_bin
+  if (supplied_path) {
+    if (!file.exists(python_command)) {
+      stop(
+        "Python executable was not found: '", python_bin, "'.\n\n",
+        .python_setup_help(),
+        call. = FALSE
+      )
+    }
+    if (dir.exists(python_command)) {
+      stop(
+        "python_bin points to a directory, not a Python executable: '",
+        python_bin, "'.\n\n", .python_setup_help(),
+        call. = FALSE
+      )
+    }
+    if (file.access(python_command, mode = 1L) != 0L) {
+      stop(
+        "Python executable is not executable: '", python_bin, "'.\n\n",
+        .python_setup_help(),
+        call. = FALSE
+      )
+    }
+  } else if (!nzchar(Sys.which(python_bin))) {
+    stop(
+      "Python executable '", python_bin, "' was not found on PATH.\n\n",
+      .python_setup_help(),
+      call. = FALSE
+    )
+  }
+
+  checker <- file.path("training", "scripts", "check_python.py")
+  if (!file.exists(checker)) {
+    stop(
+      "Could not find ", checker,
+      ". Run FAST from the Track 2.2 repository root.",
+      call. = FALSE
+    )
+  }
+
+  output <- tryCatch(
+    suppressWarnings(system2(
+      python_command,
+      args = shQuote(checker),
+      stdout = TRUE,
+      stderr = TRUE,
+      timeout = 60L
+    )),
+    error = identity
+  )
+  if (inherits(output, "error")) {
+    stop(
+      "Python executable could not be run: '", python_bin, "'. ",
+      conditionMessage(output), "\n\n", .python_setup_help(),
+      call. = FALSE
+    )
+  }
+
+  status <- attr(output, "status")
+  if (is.null(status)) {
+    status <- 0L
+  }
+  output <- output[nzchar(output)]
+  if (status %in% c(10L, 11L, 12L)) {
+    stop(
+      paste(output, collapse = "\n"),
+      "\n\n", .python_setup_help(),
+      call. = FALSE
+    )
+  }
+  if (!identical(as.integer(status), 0L)) {
+    stop(
+      "Python executable failed the FAST environment check with exit status ",
+      status, ": '", python_bin, "'.",
+      if (length(output) > 0L) paste0("\n", paste(output, collapse = "\n")) else "",
+      "\n\n", .python_setup_help(),
+      call. = FALSE
+    )
+  }
+
+  if (length(output) == 0L) {
+    stop(
+      "Python executable returned no FAST environment-check output: '",
+      python_bin, "'.\n\n", .python_setup_help(),
+      call. = FALSE
+    )
+  }
+  message(paste(output, collapse = "\n"))
+
+  invisible(python_command)
+}
 
 
 .validate_ml_args <- function(models, enet_cv_folds, xgb_cv_folds,
@@ -11,8 +129,10 @@ source(file.path("R", "write_training_artifacts.R"))
     stop("models must contain one or more of: ", paste(allowed_models, collapse = ", "))
   }
 
-  if (!is.numeric(enet_cv_folds) || length(enet_cv_folds) != 1L || enet_cv_folds < 2L) {
-    stop("enet_cv_folds must be a single integer >= 2.")
+  if ("enet" %in% models &&
+      (!is.numeric(enet_cv_folds) || length(enet_cv_folds) != 1L ||
+       enet_cv_folds < 4L)) {
+    stop("enet_cv_folds must be a single integer >= 4.")
   }
 
   if (!is.numeric(xgb_cv_folds) || length(xgb_cv_folds) != 1L || xgb_cv_folds < 2L) {
@@ -66,6 +186,9 @@ FAST_treatment_ML <- function(pheno,
     models, enet_cv_folds, xgb_cv_folds, xgb_cv_repeats,
     seed, n_cores, xgb_n_trials
   )
+  if ("xgb" %in% models) {
+    python_bin <- FAST_check_python(python_bin)
+  }
   if (is.null(n_cores)) {
     n_cores <- max(1L, parallel::detectCores() - 1L)
   }
@@ -98,5 +221,6 @@ FAST_treatment_ML <- function(pheno,
     xgb_n_trials = as.integer(xgb_n_trials)
   )
 
+  message("Training complete. Results: ", manifest$output_dir)
   manifest
 }

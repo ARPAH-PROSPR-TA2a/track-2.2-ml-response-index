@@ -46,6 +46,151 @@ run_validation_tests <- function() {
   cat("==========\n")
 
   fixture <- .make_simulated_fixture(n_subjects = 12L, n_features = 6L)
+  python_bin <- .test_python_bin()
+
+  invisible(capture.output(
+    checked_all_r_packages <- FAST_check_R(),
+    type = "message"
+  ))
+  .expect_equal(
+    checked_all_r_packages,
+    c("glmnet", "jsonlite", "pROC", "xgboost"),
+    "R check covers both tools by default"
+  )
+
+  r_messages <- capture.output(
+    checked_r_packages <- FAST_check_R("training"),
+    type = "message"
+  )
+  .expect_equal(
+    checked_r_packages,
+    c("glmnet", "jsonlite", "pROC"),
+    "R check uses the training package set"
+  )
+  .expect_true(
+    any(grepl("R is ready for FAST training", r_messages, fixed = TRUE)) &&
+      any(grepl("Using:", r_messages, fixed = TRUE)),
+    "R check reports readiness without package-by-package output"
+  )
+
+  python_messages <- capture.output(
+    checked_python <- FAST_check_python(python_bin),
+    type = "message"
+  )
+  .expect_equal(
+    checked_python,
+    python_bin,
+    "Python check preserves the exact requested interpreter path"
+  )
+  home_prefix <- paste0(path.expand("~"), .Platform$file.sep)
+  if (startsWith(python_bin, home_prefix)) {
+    tilde_python <- sub(home_prefix, paste0("~", .Platform$file.sep), python_bin, fixed = TRUE)
+    invisible(capture.output(
+      checked_tilde_python <- FAST_check_python(tilde_python),
+      type = "message"
+    ))
+    .expect_equal(
+      checked_tilde_python,
+      path.expand(tilde_python),
+      "Python check expands a home-relative path before XGB uses it"
+    )
+  }
+  .expect_true(
+    any(grepl("Python is ready for FAST XGBoost", python_messages, fixed = TRUE)) &&
+      any(grepl("Using:", python_messages, fixed = TRUE)) &&
+      length(python_messages) == 2L,
+    "Python check reports readiness and the selected executable concisely"
+  )
+  .expect_error(
+    FAST_check_python("track22-python-that-does-not-exist"),
+    "was not found on PATH",
+    "Python check distinguishes a missing PATH executable"
+  )
+  .expect_error(
+    FAST_check_python("track22-python-that-does-not-exist"),
+    "which python",
+    "Python check points users to setup next steps"
+  )
+  .expect_error(
+    FAST_check_python(tempdir()),
+    "points to a directory",
+    "Python check distinguishes a directory from an executable"
+  )
+
+  non_executable <- tempfile("track22-not-executable-")
+  writeLines("not executable", non_executable)
+  Sys.chmod(non_executable, mode = "0644")
+  .expect_error(
+    FAST_check_python(non_executable),
+    "is not executable",
+    "Python check distinguishes a non-executable file"
+  )
+
+  python_for_wrapper <- python_bin
+  if (!grepl("^[/\\\\]", python_for_wrapper)) {
+    python_for_wrapper <- file.path(getwd(), python_for_wrapper)
+  }
+  isolated_python <- tempfile("track22-isolated-python-")
+  writeLines(
+    c(
+      "#!/bin/sh",
+      paste("exec", shQuote(python_for_wrapper), "-S \"$@\"")
+    ),
+    isolated_python
+  )
+  Sys.chmod(isolated_python, mode = "0755")
+  .expect_error(
+    FAST_check_python(isolated_python),
+    "Missing required Python packages: numpy, pandas, scikit-learn, xgboost, optuna",
+    "Python check reports every missing package"
+  )
+
+  broken_module_dir <- tempfile("track22-broken-module-")
+  dir.create(broken_module_dir)
+  writeLines(
+    "raise RuntimeError('synthetic broken xgboost import')",
+    file.path(broken_module_dir, "xgboost.py")
+  )
+  previous_pythonpath <- Sys.getenv("PYTHONPATH", unset = NA_character_)
+  on.exit({
+    if (is.na(previous_pythonpath)) {
+      Sys.unsetenv("PYTHONPATH")
+    } else {
+      Sys.setenv(PYTHONPATH = previous_pythonpath)
+    }
+  }, add = TRUE)
+  Sys.setenv(PYTHONPATH = broken_module_dir)
+  .expect_error(
+    FAST_check_python(python_bin),
+    "Could not load these Python packages: xgboost",
+    "Python check distinguishes a broken package import"
+  )
+  if (is.na(previous_pythonpath)) {
+    Sys.unsetenv("PYTHONPATH")
+  } else {
+    Sys.setenv(PYTHONPATH = previous_pythonpath)
+  }
+
+  .expect_error(
+    FAST_treatment_ML(
+      pheno = data.frame(),
+      omics = data.frame(),
+      models = "xgb",
+      python_bin = "track22-python-that-does-not-exist"
+    ),
+    "was not found on PATH",
+    "XGB checks Python before validating or writing model inputs"
+  )
+  .expect_error(
+    FAST_treatment_ML(
+      pheno = data.frame(),
+      omics = data.frame(),
+      models = "enet",
+      python_bin = "track22-python-that-does-not-exist"
+    ),
+    "Missing required columns:",
+    "ENET-only runs do not require Python"
+  )
 
   missing_column <- fixture$pheno
   missing_column$SAMPLE_ID <- NULL
@@ -175,6 +320,34 @@ run_validation_tests <- function() {
 
   .expect_error(
     .validate_ml_args(
+      models = "enet",
+      enet_cv_folds = 3L,
+      xgb_cv_folds = 5L,
+      xgb_cv_repeats = 3L,
+      seed = 1L,
+      n_cores = 1L,
+      xgb_n_trials = 50L
+    ),
+    "enet_cv_folds must be a single integer >= 4",
+    "ENET rejects fewer than four CV folds before glmnet is called"
+  )
+
+  .expect_equal(
+    .validate_ml_args(
+      models = "xgb",
+      enet_cv_folds = 2L,
+      xgb_cv_folds = 5L,
+      xgb_cv_repeats = 3L,
+      seed = 1L,
+      n_cores = 1L,
+      xgb_n_trials = 30L
+    ),
+    "xgb",
+    "XGB-only runs ignore ENET's four-fold minimum"
+  )
+
+  .expect_error(
+    .validate_ml_args(
       models = "xgb",
       enet_cv_folds = 5L,
       xgb_cv_folds = 5L,
@@ -234,8 +407,27 @@ run_validation_tests <- function() {
       too_small,
       c(enet_cv_folds = 4L, xgb_cv_folds = 2L)
     ),
-    "requested CV folds exceed the smaller treatment arm (3 subjects): enet_cv_folds=4. Use 3 folds or fewer",
-    "undersized follow-up cohorts reject too many CV folds"
+    paste0(
+      "ENET needs at least 4 usable subjects in each treatment arm; ",
+      "the smaller arm has 3. Add usable subjects or remove ENET from models"
+    ),
+    "undersized follow-up cohorts explain ENET's minimum arm size"
+  )
+
+  supported_too_many <- data.frame(
+    SUBJECT_ID = paste0("S", 1:10),
+    TREATMENT_GROUP = factor(rep(0:1, each = 5L), levels = 0:1)
+  )
+  .expect_equal(
+    .validate_followup_cohort(
+      supported_too_many,
+      c(enet_cv_folds = 6L, xgb_cv_folds = 4L)
+    ),
+    paste0(
+      "requested CV folds exceed the smaller treatment arm (5 subjects): ",
+      "enet_cv_folds=6. Use 5 folds or fewer"
+    ),
+    "supported ENET fold counts can be lowered to the smaller arm size"
   )
 
   large_enough <- data.frame(
@@ -579,25 +771,32 @@ run_end_to_end_tests <- function() {
     unlink(output_dir, recursive = TRUE)
   }
 
-  manifest <- suppressWarnings(FAST_treatment_ML(
-    pheno = fixture$pheno,
-    omics = fixture$omics,
-    omics_type = "Proteomics",
-    additional_covariates = c("age", "bmi", "site", "smoker"),
-    models = c("enet", "xgb"),
-    output_dir = output_dir,
-    enet_cv_folds = 5L,
-    xgb_cv_folds = 5L,
-    xgb_cv_repeats = 3L,
-    seed = 2202L,
-    n_cores = 1L,
-    xgb_n_trials = 10L,
-    python_bin = .test_python_bin()
-  ))
+  training_messages <- capture.output(
+    manifest <- suppressWarnings(FAST_treatment_ML(
+      pheno = fixture$pheno,
+      omics = fixture$omics,
+      omics_type = "Proteomics",
+      additional_covariates = c("age", "bmi", "site", "smoker"),
+      models = c("enet", "xgb"),
+      output_dir = output_dir,
+      enet_cv_folds = 5L,
+      xgb_cv_folds = 5L,
+      xgb_cv_repeats = 3L,
+      seed = 2202L,
+      n_cores = 1L,
+      xgb_n_trials = 10L,
+      python_bin = .test_python_bin()
+    )),
+    type = "message"
+  )
 
   fu1 <- manifest$followups$FU1
   fu2 <- manifest$followups$FU2
-  .expect_true(!is.null(fu1) && !is.null(fu2), "all-subject FU1 and FU2 runs complete")
+  .expect_true(
+    !is.null(fu1) && !is.null(fu2) &&
+      any(grepl("Training complete. Results:", training_messages, fixed = TRUE)),
+    "all-subject FU1 and FU2 runs complete with a results message"
+  )
   .expect_true(
     identical(normalizePath(output_dir), manifest$output_dir),
     "test outputs persist in the working directory"
