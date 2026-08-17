@@ -1,3 +1,4 @@
+source(file.path("R", "check_environment.R"))
 source(file.path("R", "validate_inputs.R"))
 source(file.path("R", "build_training_features.R"))
 source(file.path("R", "replay_preprocessing.R"))
@@ -155,13 +156,18 @@ FAST_evaluate <- function(pheno,
                           output_dir = NULL,
                           return_matrix = FALSE) {
   model_package <- .load_exported_model_package(model_path)
-  .evaluate_model_package(
+  result <- .evaluate_model_package(
     pheno = pheno,
     omics = omics,
     model_package = model_package,
     output_dir = output_dir,
     return_matrix = return_matrix
   )
+  message(
+    "Validation complete for ", result$model_id,
+    if (is.null(result$output_dir)) "." else paste0(". Results: ", result$output_dir)
+  )
+  result
 }
 
 
@@ -192,13 +198,20 @@ FAST_bulk_evaluate <- function(pheno,
     }
 
     model_output_dir <- file.path(output_dir, "models", model_package$model_id)
-    evaluated <- tryCatch(
+    evaluate_one <- function() {
       .evaluate_model_package(
         pheno = pheno,
         omics = omics,
         model_package = model_package,
         output_dir = model_output_dir
-      ),
+      )
+    }
+    evaluated <- tryCatch(
+      if (length(rows) == 0L) {
+        evaluate_one()
+      } else {
+        suppressMessages(evaluate_one())
+      },
       error = function(e) {
         stop(
           "Failed evaluating model ", model_package$model_id,
@@ -253,6 +266,18 @@ FAST_bulk_evaluate <- function(pheno,
 
   summary_path <- file.path(output_dir, "validation_summary.csv")
   utils::write.csv(summary, summary_path, row.names = FALSE)
+
+  message(
+    "Cross-trial validation complete: ",
+    if (nrow(summary) == 0L) {
+      "no eligible models were evaluated. "
+    } else if (nrow(summary) == 1L) {
+      "1 model evaluated. "
+    } else {
+      paste0(nrow(summary), " models evaluated. ")
+    },
+    "Summary: ", normalizePath(summary_path, mustWork = FALSE)
+  )
 
   list(
     validation = summary,

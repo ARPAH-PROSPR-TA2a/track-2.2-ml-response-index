@@ -18,6 +18,14 @@
 
   class_counts <- as.integer(class_counts[c("0", "1")])
   min_class_count <- min(class_counts)
+  if ("enet_cv_folds" %in% names(fold_counts) && min_class_count < 4L) {
+    return(paste0(
+      "ENET needs at least 4 usable subjects in each treatment arm; ",
+      "the smaller arm has ", min_class_count,
+      ". Add usable subjects or remove ENET from models"
+    ))
+  }
+
   too_many <- fold_counts[fold_counts > min_class_count]
   if (length(too_many) > 0L) {
     return(paste0(

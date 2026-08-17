@@ -1,16 +1,21 @@
 # FAST Treatment ML Training
 
-Track 2.2 predicts assigned treatment from omics change signatures in
-randomized trial datasets. The target is `TREATMENT_GROUP`.
+Training is one Track 2.2 tool. It uses a labeled randomized trial to learn
+whether treatment and control subjects can be distinguished by how their omics
+measurements changed after baseline.
 
-The training pipeline exposes:
+The training code:
 
-- `FAST_treatment_ML()` for model fitting and ML-specific reports.
-- `FAST_export_models()` for self-contained JSON model packages.
+1. checks the phenotype and omics inputs;
+2. calculates follow-up minus baseline change for each omics feature;
+3. fits one ENET and one XGBoost model for each follow-up; and
+4. writes review files and exports portable model packages for another trial.
 
-## Quick Example
+## Run Training
 
-Run from the repository root:
+Run from the repository root. The
+[self-contained quick start](../README.md#quick-start) uses bundled example data
+and fits both models. With your own `pheno` and `omics` objects, the main call is:
 
 ```r
 source(file.path("training", "main.R"))
@@ -19,189 +24,111 @@ manifest <- FAST_treatment_ML(
   pheno = pheno,
   omics = omics,
   omics_type = "Proteomics",
-  additional_covariates = c("agebl", "mbmi"),
   models = c("enet", "xgb"),
   output_dir = "runs/trial_a_treatment_ml",
-  enet_cv_folds = 10,
-  xgb_cv_folds = 10,
-  xgb_cv_repeats = 3,
-  xgb_n_trials = 50,
-  n_cores = 8,
-  seed = 1
+  python_bin = "/full/path/to/python"
 )
-
-read.csv("runs/trial_a_treatment_ml/models/FU1/enet/metrics.csv")
 
 exported <- FAST_export_models(manifest)
+exported
 ```
 
-## Modeling
+`FAST_treatment_ML()` fits the requested models and returns a manifest of the
+run. `FAST_export_models()` then writes one self-contained JSON package per
+fitted model.
 
-One model is fit per nonzero follow-up. There are no sex-stratified
-models. Omics features are:
+## Inputs at a Glance
+
+`pheno` has one row per sample and identifies the subject, visit, assigned
+treatment, and `FEMALE`. `omics` has one row per analyte and one numeric column
+per sample. Omics sample-column names must match `pheno$SAMPLE_ID`.
+
+If you already ran Track 1.1.1, use the same original `pheno` and `omics` input
+tables, not its results. See the [root guidance](../README.md#if-you-already-ran-track-111)
+and the [exact input requirements](INPUTS_OUTPUTS.md#inputs).
+
+## What the Models Use
+
+Each nonzero follow-up is modeled separately. Both models use the change from
+baseline:
 
 ```text
-omics(FU k) - omics(FU 0)
+omics at follow-up - omics at baseline
 ```
 
-CV folds are subject-level and stratified by treatment. Each follow-up must have
-at least as many subjects in each treatment arm as the requested fold count.
+ENET uses the omics changes, `FEMALE`, and any requested
+`additional_covariates`. XGBoost uses the omics changes and `FEMALE`. There are
+no sex-stratified models.
 
-ENET receives omics changes, `FEMALE`, and every requested
-`additional_covariates` variable as training-only adjustment features. Numeric,
-integer, unordered factor, and logical covariates are accepted. Character and
-ordered-factor covariates are rejected. XGB receives omics changes plus
-`FEMALE`; other covariates are excluded from XGB. If `FEMALE` has zero variance
-in the training set for a follow-up, preprocessing removes it from both models.
+Cross-validation folds are assigned by subject and balanced by treatment arm.
+At every follow-up, each arm must have at least as many usable subjects as the
+requested fold count.
 
-### Categorical Covariates
+Models with training CV AUC of at least 0.8 are marked successful for
+cross-trial validation. All fitted models can be exported, but bulk validation
+uses successful packages by default.
 
-Unordered factors are converted to treatment contrasts independently within
-each follow-up. A factor with `k` observed levels produces `k - 1` columns, with
-the first declared factor level as the reference. Set factor levels explicitly
-when the reference matters:
+For exact covariate rules, preprocessing, tuning, and model behavior, use the
+[input/output reference](INPUTS_OUTPUTS.md) and
+[code walkthrough](CODE_WALKTHROUGH.md).
+
+## Check R and Python
+
+Check the R packages needed for training:
 
 ```r
-pheno$site <- factor(pheno$site, levels = c("A", "B", "C"))
+FAST_check_R("training")
 ```
 
-This produces `covariate::siteB` and `covariate::siteC`; level `A` is the
-reference. Logical covariates use `FALSE` as the reference and produce a
-`<name>TRUE` column. Unused factor levels are dropped for each follow-up, and a
-factor with only one observed level is dropped with a message.
+ENET runs entirely in R. When XGBoost is requested, R starts the selected
+Python executable and runs `training/scripts/run_xgb.py`. That environment must
+contain `numpy`, `pandas`, `scikit-learn`, `xgboost`, and `optuna`.
 
-Encoded column names are normalized with `make.names(..., unique = TRUE)`.
-Categorical columns are centered and scaled like numeric covariates. They are
-unpenalized ENET adjustment features and are intentionally excluded from XGB
-and deployment scoring.
-
-Feature columns use `omics::` and `covariate::` prefixes.
-
-## Python
-
-XGB uses `python3` from `PATH` by default. Activate the intended Python
-environment before starting R, or pass its interpreter explicitly:
+`FAST_treatment_ML()` checks the selected environment before starting XGBoost.
+For a standalone setup check, source `training/main.R` and run:
 
 ```r
-FAST_treatment_ML(
-  ...,
-  python_bin = "/path/to/python"
-)
+FAST_check_python("/full/path/to/python")
 ```
 
-The Python environment must have `numpy`, `pandas`, `scikit-learn`,
-`xgboost`, and `optuna` installed.
+The checks report R and Python readiness separately. If either stops, follow its
+next steps or see the root
+[requirements](../README.md#requirements) and
+[troubleshooting guide](../README.md#troubleshooting) for installation help.
 
-## Models
+## Where Results Go
 
-Models with `CV_AUC >= 0.8` are marked successful for cross-trial validation.
-`FAST_export_models()` writes one self-contained JSON package per fitted model
-under `models/exported_models/`; each package records whether it passed the
-success threshold.
+Inside `output_dir`:
 
-### ENET
+- `manifest.json` records the run settings and artifact paths.
+- `models/reports/` contains cohort, change, preprocessing, and analyte-name
+  reports.
+- `models/FU*/` contains ENET and XGBoost results for each follow-up.
+- `data/FU*/` contains model-ready matrices, folds, subject maps, and
+  predictions.
+- `models/exported_models/` is created by `FAST_export_models()` and contains
+  the portable model packages.
 
-`glmnet::cv.glmnet()` fits a binomial elastic-net model. Omics coefficients are
-penalized; `FEMALE` and requested covariates are included with
-`penalty.factor = 0`. The final model uses `lambda.min`, selected with
-cross-validated AUC (`type.measure = "auc"`); pooled out-of-fold AUC is reported
-at that lambda.
-Outputs include metrics, subject predictions, and coefficients sufficient to
-reproduce deployment predictions without a saved R model object. Deployment
-scoring omits training-only adjustment covariates, equivalent to setting their
-standardized values to zero.
+DNAm inputs are restricted to the reliable probe list in `Data/` before models
+are fit. The [input/output reference](INPUTS_OUTPUTS.md) gives the complete file
+layout and schemas.
 
-### XGB
+## Documentation
 
-XGB runs through `training/scripts/run_xgb.py`. Each parameter set is evaluated across
-`xgb_cv_repeats` independent stratified fold assignments and scored by mean CV
-AUC. By default, 50 Optuna trials are evaluated across three 10-fold repeats.
-XGB always uses Optuna tuning: at least 10 trials are required, and fewer than
-30 produce a limited-search warning. Outputs include metrics and selected
-parameters, predictions, feature importance, tuning history, and the fitted
-JSON model.
-
-## DNAm
-
-DNAm inputs are restricted before modeling to:
-
-```text
-Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds
-```
-
-## Output
-
-```text
-output_dir/
-  manifest.json
-  models/
-    reports/
-      cohort.csv
-      change_summary.csv
-      preprocessing.csv
-      analyte_name_map.csv
-    FU1/
-      enet/
-        metrics.csv
-        weights.csv
-      xgb/
-        metrics.csv
-        importance.csv
-        tuning.csv
-        model.json
-  data/
-    FU1/
-      enet_train.csv.gz
-      xgb_train.csv.gz
-      subjects.csv
-      xgb_folds.csv
-      enet/
-        predictions.csv
-      xgb/
-        predictions.csv
-```
-
-The model-ready matrices contain exactly the columns consumed by each model.
-`subjects.csv` combines outcomes and ENET fold assignment. `xgb_folds.csv`
-stores every repeated XGB fold assignment. These subject-level artifacts are
-written under `data/`.
-Reports under `models/reports/` stack information across follow-ups:
-`cohort.csv` records modeled cohort counts, `change_summary.csv` describes raw
-change scores by treatment arm, `preprocessing.csv` audits feature
-transformations and removals while recording the preprocessing recipe needed to
-reconstruct model matrices, and `analyte_name_map.csv` records original analyte
-names and internal XGB-safe names. Run settings and artifact paths are stored
-once in `manifest.json`.
-
-Exported model JSON packages contain the model-specific preprocessing recipe,
-training metrics, covariates, a `successful` flag, and either ENET weights or
-embedded XGBoost model JSON. They are the preferred input for single-model
-cross-trial evaluation. They are written only after `FAST_export_models()` is
-called:
-
-```text
-output_dir/
-  models/
-    exported_models/
-      exported_models.csv
-      <model_id>.json
-```
-
-See [INPUTS_OUTPUTS.md](INPUTS_OUTPUTS.md) for schemas.
+- [Input and output reference](INPUTS_OUTPUTS.md): exact data requirements and
+  artifact schemas.
+- [Code walkthrough](CODE_WALKTHROUGH.md): implementation flow and technical
+  model details.
+- [Cross-trial validation overview](../inference/README.md): how to use the
+  exported models.
 
 ## Tests
+
+From the repository root:
 
 ```bash
 Rscript tests/run_tests.R
 ```
 
-The suite requires both ENET and XGB and leaves the integration artifacts at:
-
-```text
-tests/test_outputs/track22_integration/
-```
-
-## Documentation
-
-- [INPUTS_OUTPUTS.md](INPUTS_OUTPUTS.md): input requirements and artifact schemas.
-- [CODE_WALKTHROUGH.md](CODE_WALKTHROUGH.md): implementation flow and model details.
+The full suite requires the ENET, XGBoost, export, and validation dependencies
+listed in the [root README](../README.md#requirements).

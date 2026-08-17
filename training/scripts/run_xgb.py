@@ -2,20 +2,7 @@
 import argparse
 from pathlib import Path
 
-
-def require_deps():
-    missing = []
-    for name in ("numpy", "pandas", "sklearn", "xgboost"):
-        try:
-            __import__(name)
-        except ImportError:
-            missing.append(name)
-    if missing:
-        raise RuntimeError(
-            "Missing Python package(s): "
-            + ", ".join(missing)
-            + ". Install them in the python_bin environment used by FAST_treatment_ML."
-        )
+from check_python import require_dependencies
 
 
 def auc(y, pred):
@@ -69,11 +56,11 @@ def main():
     if args.n_trials < 10:
         raise ValueError("--n-trials must be at least 10.")
 
-    require_deps()
-
-    import numpy as np
-    import pandas as pd
-    import xgboost as xgb
+    dependencies = require_dependencies()
+    np = dependencies["numpy"]
+    pd = dependencies["pandas"]
+    xgb = dependencies["xgboost"]
+    optuna = dependencies["optuna"]
 
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
@@ -128,10 +115,7 @@ def main():
             "repeat_iterations": repeat_iterations,
         }
 
-    try:
-        import optuna
-    except ImportError as exc:
-        raise RuntimeError("XGB tuning requires the Python package 'optuna'.") from exc
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     def objective(trial):
         trial_params = dict(params)

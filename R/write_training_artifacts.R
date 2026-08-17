@@ -489,6 +489,12 @@ FAST_export_models <- function(manifest,
   manifest_path <- file.path(output_dir, "exported_models.csv")
   .write_csv(exported, manifest_path)
 
+  message(
+    "Model export complete: ", nrow(exported),
+    if (nrow(exported) == 1L) " package written to " else " packages written to ",
+    normalizePath(output_dir, mustWork = FALSE)
+  )
+
   list(
     models = exported,
     output_dir = normalizePath(output_dir, mustWork = FALSE),

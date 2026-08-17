@@ -32,7 +32,7 @@ Inputs:
 | Argument | Meaning |
 |:---|:---|
 | `pheno` | Phenotype table using the same columns and validation rules as training |
-| `omics` | Long omics table using the same columns and validation rules as training |
+| `omics` | Wide omics table with one row per analyte and sample columns matching `pheno$SAMPLE_ID` |
 | `model_path` | Path to one exported model JSON package |
 | `output_dir` | Optional directory for `predictions.csv` and `validation.csv` |
 | `return_matrix` | If `TRUE`, return the reconstructed model matrix in memory |
