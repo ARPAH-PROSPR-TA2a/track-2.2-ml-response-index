@@ -186,7 +186,7 @@
 }
 
 
-.validate_omics <- function(omics, pheno_df) {
+.validate_omics <- function(omics, pheno_df, omics_type = NULL) {
   
   # Step 1: Input validation and conversion
   if (is.matrix(omics)) {
@@ -229,8 +229,24 @@
   
   # Filter omics to shared samples (keep order from pheno for consistency)
   omics_numeric <- omics_numeric[, shared_samples, drop = FALSE]
+
+  # Check coverage against the full input, then restrict DNAm before row-wise QC.
+  # Preserve the input probe order and all schema checks above.
+  if (!is.null(omics_type) && omics_type == "DNAm") {
+    full_probes <- readRDS("Data/FAST_epicv1_epicv2_probe_list.rds")
+    reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
+    .validate_dnam_probe_coverage(full_probes, reliable_probes, analyte_names)
+    keep <- analyte_names %in% reliable_probes
+    omics_numeric <- omics_numeric[keep, , drop = FALSE]
+    analyte_names <- analyte_names[keep]
+    message("DNAm: restricted analysis to ", length(analyte_names),
+            " reliable probes before per-analyte QC.")
+  }
   
   # Step 5: Quality checks
+  qc_started <- Sys.time()
+  message("Omics QC: checking missingness and near-zero variance for ",
+          length(analyte_names), " analytes.")
   n_with_na <- 0
   n_with_nzv <- 0
   
@@ -244,7 +260,12 @@
     if (.is_near_zero_variance(analyte_data)) {
       n_with_nzv <- n_with_nzv + 1
     }
+    if (i %% 10000L == 0L) {
+      message("Omics QC: checked ", i, " of ", length(analyte_names), " analytes.")
+    }
   }
+  message(sprintf("Omics QC: complete in %.1f seconds.",
+                  as.numeric(difftime(Sys.time(), qc_started, units = "secs"))))
   
   # Summmarize analyte NA/NZVs
   if (n_with_na > 0) {
@@ -301,15 +322,7 @@
   .validate_omics_type(omics_type)
 
   pheno_df <- .validate_pheno(pheno, additional_covariates)
-  omics_df <- .validate_omics(omics, pheno_df)
-
-  if (omics_type == "DNAm") {
-    full_probes <- readRDS("Data/FAST_epicv1_epicv2_probe_list.rds")
-    reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
-    .validate_dnam_probe_coverage(full_probes, reliable_probes, omics_df$ANALYTE_NAME)
-    omics_df <- .subset_omics(omics_df, reliable_probes)
-    message("DNAm: restricted analysis to ", nrow(omics_df), " reliable probes.")
-  }
+  omics_df <- .validate_omics(omics, pheno_df, omics_type = omics_type)
 
   analyte_map <- .make_xgb_safe_analyte_map(omics_df$ANALYTE_NAME)
   omics_df$ANALYTE_NAME <- analyte_map$INTERNAL_ANALYTE_NAME

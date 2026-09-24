@@ -118,6 +118,10 @@ names are mapped to internal XGB-safe names by replacing `[`, `]`, and `<` with 
 needed. Missing values and near-zero variance are reported here, but the actual
 imputation and filtering happen per follow-up.
 
+For DNAm, probe coverage is checked against the full input before restricting to
+reliable probes. Only those retained probes enter the per-analyte missingness and
+variance checks; these checks log progress and elapsed time.
+
 ## 2. Follow-Up Loop
 
 The main run body is `.run_ml_disk()` in `R/write_training_artifacts.R`.

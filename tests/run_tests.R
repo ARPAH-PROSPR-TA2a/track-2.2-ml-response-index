@@ -298,6 +298,66 @@ run_validation_tests <- function() {
     "omics validation returns the ML omics table"
   )
 
+  # Early DNAm filtering must reduce QC work without changing selected data or
+  # concealing full-input schema problems. Include discarded NA/NZV probes,
+  # retained NA/NZV probes, reversed sample order and an unmatched sample.
+  full_probes <- readRDS("Data/FAST_epicv1_epicv2_probe_list.rds")
+  reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
+  full_only <- head(setdiff(full_probes, reliable_probes), 2L)
+  sample_names <- c(rev(validated_pheno$SAMPLE_ID), "omics-only column")
+  varying <- seq(0.1, 0.9, length.out = length(sample_names))
+  dnam <- data.frame(
+    ANALYTE_NAME = c(reliable_probes[2L], full_only[1L], reliable_probes[1L],
+                     full_only[2L], reliable_probes[3L], "synthetic_discarded_probe"),
+    rbind(varying, NA_real_, 0.5, 0.25, rev(varying), NA_real_),
+    check.names = FALSE
+  )
+  names(dnam)[-1L] <- sample_names
+  rownames(dnam) <- paste0("input-row-", seq_len(nrow(dnam)))
+  dnam[1L, 3L] <- NA_real_
+  legacy_dnam <- suppressWarnings(.subset_omics(
+    .validate_omics(dnam, validated_pheno), reliable_probes
+  ))
+  dnam_warnings <- character(0)
+  early_dnam <- withCallingHandlers(
+    .prepare_inputs(validated_pheno, dnam, "DNAm")$omics,
+    warning = function(w) {
+      dnam_warnings <<- c(dnam_warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  .expect_true(
+    identical(early_dnam, legacy_dnam),
+    "early DNAm selection exactly preserves legacy row/sample order, values and missingness"
+  )
+  expected_coverage <- c(
+    sprintf("%d of %d probes from full probe list not found in data",
+            sum(!full_probes %in% dnam$ANALYTE_NAME), length(full_probes)),
+    sprintf("%d of %d probes from filtered probe list not found in data",
+            sum(!reliable_probes %in% dnam$ANALYTE_NAME), length(reliable_probes))
+  )
+  .expect_true(
+    all(expected_coverage %in% dnam_warnings),
+    "DNAm coverage still counts probes against the complete input before filtering"
+  )
+  .expect_true(
+    identical(dnam_warnings[grepl("analytes contain NA|analytes have near-zero", dnam_warnings)],
+              c("1 analytes contain NA values", "1 analytes have near-zero variance")),
+    "DNAm NA and near-zero-variance warnings count retained probes only"
+  )
+  invalid_discarded <- dnam
+  invalid_discarded[2L, 2L] <- "not numeric"
+  .expect_error(
+    .validate_omics(invalid_discarded, validated_pheno, omics_type = "DNAm"),
+    "All columns in omics (except ANALYTE_NAME) must be numeric",
+    "invalid values on discarded DNAm rows cannot bypass numeric schema validation"
+  )
+  .expect_error(
+    .validate_omics(rbind(dnam, dnam[2L, ]), validated_pheno, omics_type = "DNAm"),
+    "ANALYTE_NAME contains duplicate values",
+    "duplicate discarded DNAm probes cannot bypass whole-input uniqueness validation"
+  )
+
   safe_map <- .make_xgb_safe_analyte_map(c("plain_name", "metab[1]", "metab<2>", "IL[6]", "IL 6"))
   .expect_true(
     identical(

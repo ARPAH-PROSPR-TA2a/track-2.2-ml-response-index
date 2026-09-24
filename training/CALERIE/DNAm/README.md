@@ -72,8 +72,10 @@ sample matching. If that first row is unusable, a later replicate does not repla
 it. Retained rows stay in their raw input order. The selection rule and aggregate
 counts are recorded in `run.log` and `provenance.rds`. Remaining duplicate
 subject/visit rows, inconsistent treatment or sex across visits, and insufficient
-follow-up cohorts still stop training. The core pipeline selects the reliable
-DNAm probe set from the supplied matrix.
+follow-up cohorts still stop training. The core pipeline checks probe coverage
+against the supplied matrix, then selects reliable DNAm probes before the slower
+per-probe missingness and variance checks. QC logs show the selected count,
+progress every 10,000 probes, and elapsed time on completion.
 
 ## Launch and monitor
 

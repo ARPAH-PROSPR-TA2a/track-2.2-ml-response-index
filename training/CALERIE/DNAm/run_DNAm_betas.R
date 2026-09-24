@@ -172,7 +172,7 @@ for (fu in 1:2) {
 }
 
 # -----------------------------
-# Build aligned omics input; the pipeline selects reliable probes
+# Build aligned omics input; the pipeline selects reliable probes before row QC
 # -----------------------------
 reliable_probes <- readRDS("Data/FAST_epicv1_epicv2_sugden_TruD_probe_list.rds")
 n_reliable <- sum(reliable_probes %in% rownames(omics_raw))
@@ -201,7 +201,8 @@ saveRDS(provenance, file.path(out_dir, "provenance.rds"))
 # -----------------------------
 # Train and export models
 # -----------------------------
-log_status(paste("Training", paste(models, collapse = "/"), "on beta changes at FU1 and FU2"))
+log_status(paste("Validating model inputs, then training", paste(models, collapse = "/"),
+                 "on beta changes at FU1 and FU2"))
 manifest <- FAST_treatment_ML(
   pheno = pheno, omics = omics, omics_type = "DNAm",
   additional_covariates = additional_covariates, models = models, output_dir = out_dir,
