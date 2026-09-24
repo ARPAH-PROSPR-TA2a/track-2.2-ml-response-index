@@ -63,9 +63,16 @@ those fields into the runner's `pheno` table.
 Inputs must already be available on the VM. The runner accepts a numeric
 CpG-by-sample matrix or an all-numeric data frame, with probe IDs in row names,
 sample IDs in column names, and complete, finite beta values in `[0, 1]`. The
-phenotype table must contain `Barcode`, `Participant_ID`, `fu`, `CR`, and `female`.
-Visit codes are `0/1/2`; treatment and sex codes are `0/1`. It checks sample matching, duplicates,
-and both follow-up cohorts before fitting. The core pipeline selects the reliable
+phenotype table must contain `Barcode`, `Participant_ID`, `Time_Point`, `fu`, `CR`,
+and `female`. Visit codes are `0/1/2`; treatment and sex codes are `0/1`.
+
+As in Track 3.3, the runner rejects duplicate raw `Barcode` values and keeps the
+first raw row per `Participant_ID`/`Time_Point` before completeness filtering and
+sample matching. If that first row is unusable, a later replicate does not replace
+it. Retained rows stay in their raw input order. The selection rule and aggregate
+counts are recorded in `run.log` and `provenance.rds`. Remaining duplicate
+subject/visit rows, inconsistent treatment or sex across visits, and insufficient
+follow-up cohorts still stop training. The core pipeline selects the reliable
 DNAm probe set from the supplied matrix.
 
 ## Launch and monitor

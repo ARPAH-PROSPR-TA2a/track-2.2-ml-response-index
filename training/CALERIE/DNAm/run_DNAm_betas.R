@@ -80,10 +80,34 @@ log_status(sprintf(
 # -----------------------------
 # Build the treatment-prediction cohort (no INF/MetS outcome filtering)
 # -----------------------------
-required_raw <- c("Barcode", "Participant_ID", "fu", "CR", "female")
+required_raw <- c("Barcode", "Participant_ID", "Time_Point", "fu", "CR", "female")
 if (!is.data.frame(pheno_raw) || !all(required_raw %in% names(pheno_raw))) {
   stop("Phenotype input must contain: ", paste(required_raw, collapse = ", "))
 }
+if (anyDuplicated(pheno_raw$Barcode)) {
+  stop("Duplicate Barcode values in raw phenotype input; resolve before training.")
+}
+# Match Track 3.3's sample selection: first raw row per participant/time point,
+# before checking completeness or DNAm matching. Do not promote later replicates
+# if the first row is unusable. Keep the retained rows in their raw input order.
+visit_keys <- pheno_raw[c("Participant_ID", "Time_Point")]
+replicate_rows <- duplicated(visit_keys)
+replicate_selection <- list(
+  rule = "first raw row per Participant_ID/Time_Point",
+  stage = "before completeness filtering and sample matching",
+  retained_order = "raw input order",
+  raw_rows = nrow(pheno_raw),
+  duplicate_groups = nrow(unique(visit_keys[replicate_rows, , drop = FALSE])),
+  removed_rows = sum(replicate_rows), retained_rows = sum(!replicate_rows)
+)
+log_status(sprintf(
+  paste0("Replicate selection: keeping first raw row per Participant_ID/Time_Point ",
+         "before completeness and sample matching; %d raw rows, %d repeated groups, ",
+         "%d rows removed, %d rows retained"),
+  replicate_selection$raw_rows, replicate_selection$duplicate_groups,
+  replicate_selection$removed_rows, replicate_selection$retained_rows
+))
+pheno_raw <- pheno_raw[!replicate_rows, , drop = FALSE]
 # Preserve underlying 0/1 and 0/1/2 codes from haven-labelled columns.
 # For factors, parse the displayed codes, never the internal level numbers.
 read_code <- function(x, allowed, label) {
@@ -169,6 +193,7 @@ provenance <- list(
   n_cores = n_cores, enet_cv_folds = enet_cv_folds, xgb_cv_folds = xgb_cv_folds,
   xgb_cv_repeats = xgb_cv_repeats, xgb_n_trials = xgb_n_trials, seed = seed,
   additional_covariates = additional_covariates, n_reliable_probes = n_reliable,
+  replicate_selection = replicate_selection,
   visits = c(baseline = 0L, month12 = 1L, month24 = 2L), session_info = sessionInfo()
 )
 saveRDS(provenance, file.path(out_dir, "provenance.rds"))

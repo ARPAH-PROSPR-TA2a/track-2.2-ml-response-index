@@ -32,7 +32,8 @@ run_tests <- function() {
   )
   subjects <- sprintf("SIM-%02d", visits$subject)
   barcodes <- paste0("2014 chip-", subjects, "/visit", visits$fu)
-  pheno <- data.frame(Barcode = barcodes, Participant_ID = subjects)
+  pheno <- data.frame(Barcode = barcodes, Participant_ID = subjects,
+                      Time_Point = paste0("Month", visits$fu * 12L))
   pheno$fu <- haven::labelled(visits$fu, c(Baseline = 0L, Month12 = 1L, Month24 = 2L))
   pheno$CR <- haven::labelled(visits$subject %% 2L, c(Control = 0L, Treatment = 1L))
   pheno$female <- haven::labelled((visits$subject %/% 2L) %% 2L, c(Male = 0L, Female = 1L))
@@ -47,6 +48,17 @@ run_tests <- function() {
   beta <- cbind(beta, "omics-only" = rep(0.5, nrow(beta)))
   beta <- beta[, sample(ncol(beta)), drop = FALSE]
   pheno <- pheno[sample(nrow(pheno)), , drop = FALSE]
+  # A later assay of the same visit has distinctive values; the first raw row
+  # must supply the beta deltas checked in the real training run below.
+  winning_barcode <- pheno$Barcode[pheno$Participant_ID == "SIM-01" & as.numeric(pheno$fu) == 1L]
+  later_replicate <- pheno[match(winning_barcode, pheno$Barcode), ]
+  later_barcode <- later_replicate$Barcode <- "later-technical-replicate"
+  middle_replicate <- later_replicate
+  middle_replicate$Barcode <- "middle-technical-replicate"
+  replicate_barcodes <- c(middle_replicate$Barcode, later_barcode)
+  pheno <- rbind(pheno, middle_replicate, later_replicate)
+  beta <- cbind(beta, "middle-technical-replicate" = rep(0.05, nrow(beta)),
+                "later-technical-replicate" = rep(0.95, nrow(beta)))
   save_inputs <- function(b = beta, p = pheno) {
     saveRDS(b, raw_paths[1L])
     saveRDS(p, raw_paths[2L])
@@ -74,12 +86,15 @@ run_tests <- function() {
                "runner defaults to FEMALE without extra adjustment covariates")
   .expect_true(identical(names(execution$omics)[-1L], execution$pheno$SAMPLE_ID),
                "shuffled nonsyntactic sample names align without renaming")
+  .expect_true(winning_barcode %in% execution$pheno$SAMPLE_ID &&
+                 !any(replicate_barcodes %in% execution$pheno$SAMPLE_ID),
+               "training selects the first raw assay of a replicated visit")
   preprocessing <- read.csv(manifest$reports$preprocessing, stringsAsFactors = FALSE)
   for (fu in 1:2) {
     artifacts <- manifest$followups[[paste0("FU", fu)]]$artifacts
     retained <- read.csv(artifacts$subjects, stringsAsFactors = FALSE)
     intended <- sprintf("SIM-%02d", if (fu == 1L) 1:40 else 9:48)
-    expected_order <- pheno$Participant_ID[as.numeric(pheno$fu) == fu &
+    expected_order <- pheno$Participant_ID[!pheno$Barcode %in% replicate_barcodes & as.numeric(pheno$fu) == fu &
                                            pheno$Participant_ID %in% intended]
     .expect_true(identical(retained$SUBJECT_ID, expected_order) && nrow(retained) == 40L,
                  paste0("FU", fu, " preserves its exact baseline-paired population and order"))
@@ -111,6 +126,13 @@ run_tests <- function() {
                  provenance$n_reliable_probes == length(probes) &&
                  !is.null(provenance$finished) && provenance$elapsed_seconds > 0,
                "completed provenance records beta scale, input paths, coverage and timing")
+  selection <- provenance$replicate_selection
+  .expect_true(identical(selection$rule, "first raw row per Participant_ID/Time_Point") &&
+                 identical(selection$stage, "before completeness filtering and sample matching") &&
+                 identical(selection$retained_order, "raw input order") &&
+                 selection$raw_rows == nrow(pheno) && selection$duplicate_groups == 1L &&
+                 selection$removed_rows == 2L && selection$retained_rows == nrow(pheno) - 2L,
+               "provenance records the established replicate rule and aggregate counts")
   log <- readLines(file.path(execution$out_dir, "run.log"))
   .expect_true(!any(grepl("SIM-|chip-", log)), "runner status log contains no sample or subject identifiers")
 
@@ -155,11 +177,28 @@ run_tests <- function() {
     invalid_beta[1L, 1L] <- value
     reject(paste("invalid beta rejected:", value), "complete, finite DNAm beta", b = invalid_beta)
   }
-  replicate <- pheno[pheno$Participant_ID == "SIM-01" & as.numeric(pheno$fu) == 1L, ]
-  replicate_beta <- beta[, replicate$Barcode, drop = FALSE]
-  replicate$Barcode <- colnames(replicate_beta) <- "distinct-technical-replicate"
-  reject("duplicate subject/visit with distinct sample IDs rejected", "Duplicate usable",
-         b = cbind(beta, replicate_beta), p = rbind(pheno, replicate))
+  reordered <- pheno[c(nrow(pheno), seq_len(nrow(pheno) - 1L)), ]
+  selected <- run_preflight(p = reordered)$pheno$SAMPLE_ID
+  .expect_true(later_barcode %in% selected && !winning_barcode %in% selected,
+               "replicate selection follows raw row order rather than barcode sorting")
+  invalid_discarded <- pheno
+  invalid_discarded$fu[nrow(pheno)] <- 99L
+  .expect_true(identical(run_preflight(p = invalid_discarded)$pheno, execution$pheno),
+               "replicate selection precedes visit-code validation")
+  first_incomplete <- pheno
+  first_incomplete$female[match(winning_barcode, first_incomplete$Barcode)] <- NA
+  .expect_true(!"SIM-01" %in% run_preflight(p = first_incomplete)$pheno$SUBJECT_ID,
+               "missing required value in first assay does not promote a later assay")
+  .expect_true(!"SIM-01" %in% run_preflight(b = beta[, colnames(beta) != winning_barcode])$pheno$SUBJECT_ID,
+               "unmatched first assay does not promote a later matched assay")
+  duplicate_barcode <- pheno[match(winning_barcode, pheno$Barcode), ]
+  duplicate_barcode$female <- NA
+  reject("duplicate raw Barcode rejected even when later row is incomplete", "Duplicate Barcode",
+         p = rbind(pheno, duplicate_barcode))
+  ambiguous_visit <- pheno
+  ambiguous_visit$Time_Point[nrow(pheno)] <- "OtherTimePoint"
+  reject("distinct Time_Point groups mapping to the same subject/FU rejected", "Duplicate usable",
+         p = ambiguous_visit)
   inconsistent <- pheno
   idx <- which(inconsistent$Participant_ID == "SIM-01" & as.numeric(inconsistent$fu) == 1L)
   inconsistent$CR[idx] <- 1L - as.numeric(inconsistent$CR[idx])
