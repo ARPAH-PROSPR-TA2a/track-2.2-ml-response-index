@@ -49,7 +49,7 @@ Edit the paths and settings at the top of `run_DNAm_betas.R` before launch:
 | Beta matrix | `~/FAST/Data/CALERIE/Raw/DNAm/GRSet_fully_filtered_bmiq_chunk.rds` |
 | Phenotypes | `~/FAST/Data/CALERIE/Raw/DNAm/CALERIE_CPR_processed_pheno.rds` |
 | Python | `~/FAST/Envs/track22/bin/python` |
-| Results | `~/FAST/Outputs/2.2/DNAm_betas_<timestamp>` |
+| Results | `~/FAST/Outputs/2.2/DNAm_betas_2.2_Output` |
 | XGBoost threads | `7` on the 8-vCPU machine |
 | ENET CV | `10` folds |
 | XGBoost tuning | `100` trials, `10` folds, `3` repeats |
@@ -91,11 +91,13 @@ printf 'Run exit status: %s\nConsole log: %s\n' "$run_status" "$console_log"
 succeeds. A zero status and the runner's `COMPLETE` message indicate completion.
 Detach with **Ctrl-b, then d**; reconnect with `tmux attach -t track22`.
 
-The console log captures stdout/stderr, including errors. Each timestamped result
-directory also contains a concise `run.log` and `provenance.rds`, alongside the
+The console log captures stdout/stderr, including errors. The result directory
+also contains a concise `run.log` and `provenance.rds`, alongside the
 pipeline's `manifest.json`, `data/`, and `models/`. Exported model packages and their
 index are under `models/exported_models/`; a complete run exports four models.
 
 The current XGBoost worker is quiet during tuning; a lack of new log lines alone
-does not mean it has stalled. This runner has **no checkpoint/resume**. Restarting creates
-a new timestamped run and repeats training.
+does not mean it has stalled. This runner has **no checkpoint/resume** and stops
+if the result directory already exists. For a rerun, choose a new `out_dir` at the
+top of the script; training starts from the beginning. The runner creates its
+result directory, so do not create `DNAm_betas_2.2_Output` before launching.

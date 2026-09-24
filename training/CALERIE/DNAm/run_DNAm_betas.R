@@ -5,9 +5,7 @@ pipeline_repo <- path.expand("~/FAST/GitHub/track-2.2")
 omics_raw_path <- path.expand("~/FAST/Data/CALERIE/Raw/DNAm/GRSet_fully_filtered_bmiq_chunk.rds")
 pheno_raw_path <- path.expand("~/FAST/Data/CALERIE/Raw/DNAm/CALERIE_CPR_processed_pheno.rds")
 python_bin <- path.expand("~/FAST/Envs/track22/bin/python")
-out_dir <- path.expand(file.path(
-  "~/FAST/Outputs/2.2", paste0("DNAm_betas_", format(Sys.time(), "%Y%m%d_%H%M%S"))
-))
+out_dir <- path.expand("~/FAST/Outputs/2.2/DNAm_betas_2.2_Output")
 
 models <- c("enet", "xgb")
 n_cores <- 7L # XGBoost threads; leave headroom on the 8-vCPU cloud machine.
