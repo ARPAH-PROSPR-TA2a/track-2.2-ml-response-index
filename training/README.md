@@ -13,6 +13,9 @@ The training code:
 
 ## Run Training
 
+For CALERIE DNAm beta training on the cloud machine, use the
+[CALERIE runner and setup guide](CALERIE/DNAm/README.md).
+
 Run from the repository root. The
 [self-contained quick start](../README.md#quick-start) uses bundled example data
 and fits both models. With your own `pheno` and `omics` objects, the main call is:
