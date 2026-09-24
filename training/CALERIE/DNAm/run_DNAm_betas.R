@@ -53,8 +53,14 @@ log_status(sprintf(
 log_status("Loading raw beta matrix and phenotype table")
 omics_raw <- readRDS(omics_raw_path)
 pheno_raw <- readRDS(pheno_raw_path)
+if (is.data.frame(omics_raw)) {
+  if (!all(vapply(omics_raw, is.numeric, logical(1)))) {
+    stop("Raw DNAm data-frame columns must all be numeric beta measurements.")
+  }
+  omics_raw <- as.matrix(omics_raw)
+}
 if (!is.matrix(omics_raw) || !is.numeric(omics_raw)) {
-  stop("Expected the raw DNAm file to contain a numeric CpG-by-sample matrix.")
+  stop("Expected the raw DNAm file to contain a numeric CpG-by-sample matrix or data frame.")
 }
 valid_names <- function(x) {
   length(x) > 0L && !anyNA(x) && all(nzchar(trimws(x))) && !anyDuplicated(x)

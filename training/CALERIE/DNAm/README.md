@@ -60,10 +60,11 @@ This runner uses 100 trials per follow-up and retains the pipeline's 10-fold,
 this setting if the allocation changes. Adding covariates also requires loading
 those fields into the runner's `pheno` table.
 
-Inputs must already be available on the VM. The runner requires a numeric
-CpG-by-sample matrix with complete, finite beta values in `[0, 1]`, and phenotype
-columns `Barcode`, `Participant_ID`, `fu`, `CR`, and `female`. Visit codes are
-`0/1/2`; treatment and sex codes are `0/1`. It checks sample matching, duplicates,
+Inputs must already be available on the VM. The runner accepts a numeric
+CpG-by-sample matrix or an all-numeric data frame, with probe IDs in row names,
+sample IDs in column names, and complete, finite beta values in `[0, 1]`. The
+phenotype table must contain `Barcode`, `Participant_ID`, `fu`, `CR`, and `female`.
+Visit codes are `0/1/2`; treatment and sex codes are `0/1`. It checks sample matching, duplicates,
 and both follow-up cohorts before fitting. The core pipeline selects the reliable
 DNAm probe set from the supplied matrix.
 

@@ -114,19 +114,38 @@ run_tests <- function() {
   log <- readLines(file.path(execution$out_dir, "run.log"))
   .expect_true(!any(grepl("SIM-|chip-", log)), "runner status log contains no sample or subject identifiers")
 
-  # Execute real input validation through both-visit preflight only; no model call
-  # is evaluated in rejection tests, and no validation function is replaced.
+  # Exercise alternate containers and invalid inputs through real preflight,
+  # without fitting more models or replacing any validation function.
   start <- which(vapply(runner, assignment, logical(1), name = "omics_raw"))
   end <- which(vapply(runner, assignment, logical(1), name = "reliable_probes")) - 1L
   preflight <- runner[start:end]
-  reject <- function(label, pattern, b = beta, p = pheno) {
+  run_preflight <- function(b = beta, p = pheno) {
     save_inputs(b, p)
     context <- list2env(list(omics_raw_path = raw_paths[1L], pheno_raw_path = raw_paths[2L],
                             models = c("enet", "xgb"), enet_cv_folds = 4L,
                             xgb_cv_folds = 2L, log_status = function(text) invisible(NULL)),
                        parent = globalenv())
-    .expect_error(for (expr in preflight) eval(expr, context), pattern, label)
+    for (expr in preflight) eval(expr, context)
+    context
   }
+  reject <- function(label, pattern, b = beta, p = pheno) {
+    .expect_error(run_preflight(b, p), pattern, label)
+  }
+  numeric_frame <- as.data.frame(beta, check.names = FALSE)
+  rownames(numeric_frame)[nrow(numeric_frame)] <- "synthetic [non reliable]"
+  numeric_matrix <- beta
+  rownames(numeric_matrix) <- rownames(numeric_frame)
+  frame_preflight <- run_preflight(numeric_frame)
+  .expect_true(identical(frame_preflight$omics_raw, numeric_matrix),
+               "numeric data.frame preserves matrix values and nonsyntactic probe/sample names")
+  .expect_true(identical(frame_preflight$pheno, execution$pheno),
+               "numeric data.frame retains the matrix input's exact paired cohort and ordering")
+  mixed_frame <- numeric_frame
+  mixed_frame[[1L]] <- as.character(mixed_frame[[1L]])
+  reject("mixed numeric/character data.frame rejected without coercion", "numeric", b = mixed_frame)
+  character_frame <- numeric_frame
+  character_frame[] <- lapply(character_frame, as.character)
+  reject("character data.frame rejected without coercion", "numeric", b = character_frame)
   invalid_code <- pheno
   invalid_code$fu <- as.numeric(invalid_code$fu)
   invalid_code$fu[1L] <- 0.5
