@@ -52,13 +52,15 @@
   
   # Step 3: Validate required columns (values, then types)
   # FU validation
-  fu_num <- suppressWarnings(as.integer(as.character(pheno$FU)))
-  if (any(is.na(fu_num))) {
+  fu_num <- suppressWarnings(as.numeric(as.character(pheno$FU)))
+  if (any(!is.finite(fu_num)) || any(fu_num != trunc(fu_num)) ||
+      any(fu_num > .Machine$integer.max)) {
     stop("FU must be integer-valued (e.g., 0, 1, 2, ...).")
   }
   if (any(fu_num < 0)) {
     stop("FU must be non-negative (baseline is FU == 0).")
   }
+  fu_num <- as.integer(fu_num)
   if (!any(fu_num == 0)) {
     stop("pheno must contain at least one baseline sample (FU == 0)")
   }

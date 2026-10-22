@@ -200,6 +200,54 @@ run_validation_tests <- function() {
     "missing required phenotype columns are rejected"
   )
 
+  # Validate visit values before integer conversion can relabel or merge visits.
+  fu_pheno <- .make_simulated_fixture(
+    n_subjects = 4L, n_features = 6L, followups = 1:2
+  )$pheno
+  fu_formats <- list(
+    numeric = identity,
+    character = as.character,
+    factor = function(x) factor(x, levels = rev(sort(unique(x))))
+  )
+  for (format_name in names(fu_formats)) {
+    format_fu <- fu_formats[[format_name]]
+    candidate <- fu_pheno
+    candidate$FU <- format_fu(fu_pheno$FU)
+    validated <- suppressWarnings(.validate_pheno(candidate))
+    .expect_true(
+      identical(validated$FU, factor(fu_pheno$FU)) &&
+        identical(validated$SAMPLE_ID, fu_pheno$SAMPLE_ID),
+      paste(format_name, "integer-valued follow-ups preserve visits and rows")
+    )
+    for (invalid_visits in list(c(0, 1.5, 2.5), c(-0.5, 0.5, 1.5))) {
+      candidate$FU <- format_fu(invalid_visits[fu_pheno$FU + 1L])
+      .expect_error(
+        suppressWarnings(.validate_pheno(candidate)),
+        "FU must be integer-valued",
+        paste(format_name, "fractional follow-ups are rejected:",
+              paste(invalid_visits, collapse = "/"))
+      )
+    }
+  }
+  for (invalid_fu in c(NA_real_, NaN, Inf, -Inf, .Machine$integer.max + 1)) {
+    candidate <- fu_pheno
+    candidate$FU[1L] <- invalid_fu
+    .expect_error(
+      suppressWarnings(.validate_pheno(candidate)),
+      "FU must be integer-valued",
+      paste("nonfinite or out-of-range follow-up rejected:", invalid_fu)
+    )
+  }
+  for (negative_fu in c(-1, -3e9)) {
+    candidate <- fu_pheno
+    candidate$FU[1L] <- negative_fu
+    .expect_error(
+      suppressWarnings(.validate_pheno(candidate)),
+      "FU must be non-negative",
+      paste("negative follow-up rejected before integer conversion:", negative_fu)
+    )
+  }
+
   invalid_treatment <- fixture$pheno
   invalid_treatment$TREATMENT_GROUP[1] <- 2L
   .expect_error(
